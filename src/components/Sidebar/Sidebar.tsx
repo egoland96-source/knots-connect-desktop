@@ -52,7 +52,7 @@ export const Sidebar = React.memo(({ activePage, onNavigate }: SidebarProps) => 
 {/* LOGO */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 var(--space-2)', marginBottom: 'var(--space-6)' }}>
         <motion.img
-          src="/logo.png"
+          src="logo.png"
           alt="Knots Connect"
           whileHover={{ rotate: 8, scale: 1.05 }}
           transition={{ duration: 0.2 }}
