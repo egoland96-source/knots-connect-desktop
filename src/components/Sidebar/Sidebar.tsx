@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { LayoutDashboard, Server, BarChart3, Settings, User, ShieldCheck, LogOut } from 'lucide-react';
 import { useConnectionStore } from '../../store/connectionStore';
+import { useAuthStore } from '../../store/authStore';
 import type { PageKey, SidebarProps } from './Sidebar.types';
 import { Badge } from '../ui';
 
@@ -15,6 +16,12 @@ const NAV_ITEMS: { key: PageKey; label: string; icon: React.ComponentType<any> }
 
 export const Sidebar = React.memo(({ activePage, onNavigate }: SidebarProps) => {
   const status = useConnectionStore((s) => s.status);
+  const user = useAuthStore((s) => s.user);
+  const logout = useAuthStore((s) => s.logout);
+  const [confirmLogout, setConfirmLogout] = React.useState(false);
+
+  const displayName = user?.username || 'Operator';
+  const avatarLetter = displayName.charAt(0).toUpperCase();
 
   const statusLabel = useMemo(() => {
     switch (status) {
@@ -153,11 +160,11 @@ export const Sidebar = React.memo(({ activePage, onNavigate }: SidebarProps) => 
             flexShrink: 0,
           }}
         >
-          A
+          {avatarLetter}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            Operator
+            {displayName}
           </div>
           <Badge tone={statusLabel.tone} style={{ marginTop: 3, fontSize: 9.5, padding: '2px 8px' }}>
             {statusLabel.text}
@@ -165,25 +172,39 @@ export const Sidebar = React.memo(({ activePage, onNavigate }: SidebarProps) => 
         </div>
         <button
           aria-label="Çıkış"
+          title="Çıkış yap"
+          onClick={async () => {
+            if (!confirmLogout) {
+              setConfirmLogout(true);
+              setTimeout(() => setConfirmLogout(false), 3000);
+              return;
+            }
+            await logout();
+          }}
           style={{
             width: 28,
             height: 28,
             borderRadius: 8,
             border: 'none',
-            background: 'transparent',
-            color: 'var(--text-muted)',
+            background: confirmLogout ? 'rgba(239,68,68,0.15)' : 'transparent',
+            color: confirmLogout ? 'var(--danger)' : 'var(--text-muted)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             cursor: 'pointer',
             transition: 'background 150ms var(--ease), color 150ms var(--ease)',
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239,68,68,0.12)'; e.currentTarget.style.color = 'var(--danger)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+          onMouseEnter={(e) => { if (!confirmLogout) { e.currentTarget.style.background = 'rgba(239,68,68,0.12)'; e.currentTarget.style.color = 'var(--danger)'; } }}
+          onMouseLeave={(e) => { if (!confirmLogout) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)'; } }}
         >
           <LogOut size={15} strokeWidth={2} />
         </button>
       </div>
+      {confirmLogout && (
+        <div style={{ fontSize: 11, color: 'var(--danger)', padding: '4px 2px 0', textAlign: 'center' }}>
+          Tekrar tıkla — çıkış yapılacak
+        </div>
+      )}
     </nav>
   );
 });

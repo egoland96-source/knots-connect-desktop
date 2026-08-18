@@ -13,6 +13,7 @@
   "build": {
     "appId": "com.knotsconnect.desktop",
     "productName": "Knots Connect",
+    "icon": "build/icon.ico",
     "publish": {
       "provider": "github",
       "owner": "egoland96-source",
@@ -24,6 +25,10 @@
       "package.json"
     ],
     "extraResources": [
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
+      },
       {
         "from": "backend",
         "to": "backend",

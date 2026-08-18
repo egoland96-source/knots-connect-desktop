@@ -226,6 +226,7 @@ export const Settings: React.FC = () => {
             desc="Show a notification when the connection state changes"
             checked={false}
             onChange={() => {}}
+            disabled
           />
           <ToggleItem
             icon={Bell}
@@ -251,6 +252,7 @@ export const Settings: React.FC = () => {
             desc="Keep the app running in the system tray when closed"
             checked={false}
             onChange={() => {}}
+            disabled
           />
         </Section>
       </div>

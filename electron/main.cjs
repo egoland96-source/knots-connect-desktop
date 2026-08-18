@@ -38,6 +38,27 @@ let appSettingsMemory = {
   adblock: true,
 };
 
+const SETTINGS_FILE = () => path.join(app.getPath('userData'), 'settings.json');
+
+function loadAppSettings() {
+  try {
+    if (fs.existsSync(SETTINGS_FILE())) {
+      const saved = JSON.parse(fs.readFileSync(SETTINGS_FILE(), 'utf8'));
+      appSettingsMemory = { ...appSettingsMemory, ...saved };
+    }
+  } catch (err) {
+    console.error('[Electron] Ayarlar yüklenemedi:', err.message);
+  }
+}
+
+function saveAppSettings() {
+  try {
+    fs.writeFileSync(SETTINGS_FILE(), JSON.stringify(appSettingsMemory, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[Electron] Ayarlar kaydedilemedi:', err.message);
+  }
+}
+
 // =========================================================================
 // ENGINE PROCESS MANAGEMENT
 // =========================================================================
@@ -249,6 +270,9 @@ function createWindow() {
     resizable: true,
     frame: false,
     titleBarStyle: 'hidden',
+    icon: app.isPackaged
+      ? path.join(process.resourcesPath, 'icon.ico')
+      : path.join(__dirname, '..', 'build', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -349,6 +373,16 @@ ipcMain.handle('knots:setEncryptionMethod', async (event, methodId) => {
 ipcMain.handle('knots:getSettings', async () => appSettingsMemory);
 ipcMain.handle('knots:updateSetting', async (event, key, value) => {
   appSettingsMemory[key] = value;
+  saveAppSettings();
+
+  // startWithWindows: gerçek otomatik başlatma kaydı (Windows)
+  if (key === 'startWithWindows') {
+    try {
+      app.setLoginItemSettings({ openAtLogin: !!value });
+    } catch (err) {
+      console.error('[Electron] Otomatik başlatma ayarlanamadı:', err.message);
+    }
+  }
 
   // AdBlock toggle'ını çalışan Go motoruna CANLI ilet (yeniden başlatma yok).
   // Motor CLI flag'ini ikinci kez okumaz; stdin RPC ile SetEnabled çağrılır.
@@ -531,7 +565,7 @@ function getSecureValue(key) {
     const entry = stored[key];
     if (!entry) return null;
     const decrypted = safeStorage.unpackSync(Buffer.from(entry, 'base64'));
-    return decrypted || null;
+    return Buffer.isBuffer(decrypted) ? decrypted.toString('utf8') : decrypted || null;
   } catch (_) {}
   return null;
 }
@@ -624,6 +658,7 @@ ipcMain.handle('app:installUpdate', () => {
 
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
+  loadAppSettings();
   createWindow();
   if (app.isPackaged) {
     autoUpdater.checkForUpdatesAndNotify();

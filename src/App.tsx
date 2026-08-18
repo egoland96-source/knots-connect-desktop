@@ -12,6 +12,7 @@ import { AuthPage } from './components/auth/AuthPage';
 import { VerifyEmailScreen } from './components/auth/VerifyEmailScreen';
 import { ConnectionBorder } from './components/ConnectionBorder/ConnectionBorder';
 import { useTelemetryInit } from './store/connectionStore';
+import { useConnectionStore } from './store/connectionStore';
 import { usePrivacyStore } from './store/privacyStore';
 import { useAuthStore } from './store/authStore';
 import { useNavStore } from './store/navStore';
@@ -44,6 +45,7 @@ export const App = () => {
 
   useEffect(() => {
     const unsubscribe = initTelemetry();
+    useConnectionStore.getState().loadInitialSettings();
     return () => unsubscribe();
   }, [initTelemetry]);
 
