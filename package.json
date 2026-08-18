@@ -1,6 +1,6 @@
 {
   "name": "knots-connect-desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Knots Connect - Electron + React masaüstü istemcisi",
   "main": "electron/main.cjs",
   "scripts": {
@@ -70,11 +70,9 @@
     }
   },
   "dependencies": {
-    "@supabase/server": "^1.4.1",
     "axios": "^1.7.2",
     "electron-updater": "^6.8.9",
     "framer-motion": "^12.43.0",
-    "go": "^3.0.1",
     "immer": "^11.1.15",
     "keytar": "^7.9.0",
     "lucide-react": "^1.28.0",
