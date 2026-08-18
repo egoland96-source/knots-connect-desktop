@@ -1,0 +1,28 @@
+#!/bin/sh
+
+# Gradle wrapper startup script
+
+APP_HOME_DIR=`cd \`dirname "$0"\` && pwd`
+
+# Determine the Java command to use
+if [ -n "$JAVA_HOME" ] ; then
+    JAVACMD="$JAVA_HOME/bin/java"
+    if [ ! -x "$JAVACMD" ]; then
+        echo "Error: JAVA_HOME is set but java executable not found at $JAVACMD"
+        exit 1
+    fi
+elif command -v java >/dev/null 2>&1; then
+    JAVACMD=java
+else
+    echo "Error: java not found in PATH. Please install JDK or set JAVA_HOME."
+    exit 1
+fi
+
+# Find the wrapper jar
+WRAPPER_JAR="$APP_HOME_DIR/gradle/wrapper/gradle-wrapper.jar"
+if [ ! -f "$WRAPPER_JAR" ]; then
+    echo "Error: gradle-wrapper.jar not found at $WRAPPER_JAR"
+    exit 1
+fi
+
+exec "$JAVACMD" -Dfile.encoding=UTF-8 -cp "$WRAPPER_JAR" org.gradle.wrapper.GradleWrapperMain "$@"

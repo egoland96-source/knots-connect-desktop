@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="AppTheme">
+        <item name="android:windowBackground">#07111E</item>
+        <item name="android:statusBarColor">#07111E</item>
+        <item name="android:navigationBarColor">#07111E</item>
+        <item name="android:textColorPrimary">#FFFFFF</item>
+        <item name="android:textColorSecondary">#CBD5E1</item>
+    </style>
+
+</resources>

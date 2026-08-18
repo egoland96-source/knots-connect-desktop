@@ -1,0 +1,268 @@
+@import './tokens.css';
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-family);
+  background: var(--bg-gradient);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden; /* masaüstü pencere - sayfa kaymasın, iç alanlar kendi scroll'unu yönetir */
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+input, select, textarea {
+  font-family: inherit;
+  color: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.12);
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.2);
+}
+
+/* Custom title bar için: bu alan sürüklenebilir, içindeki butonlar sürüklenemez */
+.app-region-drag {
+  -webkit-app-region: drag;
+}
+.app-region-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg-gradient);
+}
+
+.app-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.app-content {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: var(--space-6);
+}
+
+/* Genel geçiş keyframeleri */
+@keyframes knots-pulse {
+  0% { transform: scale(0.6); opacity: 0.8; }
+  70% { transform: scale(2.2); opacity: 0; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
+@keyframes knots-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes knots-spin-reverse {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(-360deg); }
+}
+
+@keyframes knots-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes knots-crossfade {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.knots-pulse-ring {
+  animation: knots-pulse 2.4s ease-out infinite;
+}
+
+.knots-crossfade-enter {
+  animation: knots-crossfade 0.3s ease-out;
+}
+
+.knots-crossfade-exit {
+  animation: knots-crossfade 0.2s ease-in reverse;
+}
+
+/* =====================================================================
+   Knots Signature — Ambient Connection Light
+   A subtle blue light that RISES FROM THE BOTTOM of the app when
+   connected. Very low opacity, radial + linear gradient, no particles,
+   no moving rays. Gentle breathing every 7s (±2% opacity).
+   ===================================================================== */
+@keyframes knots-ambient-breathe {
+  0%, 100% { opacity: var(--ambient-opacity); }
+  50%      { opacity: var(--ambient-opacity-breathe); }
+}
+
+@keyframes knots-ambient-breathe-strong {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 1.3; }
+}
+
+/* Bottom ambient light layer — lives inside the glass dashboard panel,
+   anchored to its bottom edge so it reads as the panel emitting energy. */
+.knots-ambient-light {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 62%;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+  transform: translateZ(0);
+  will-change: opacity;
+  background:
+    radial-gradient(
+      ellipse 72% 78% at 50% 100%,
+      rgba(88, 197, 255, 0.33) 0%,
+      rgba(88, 197, 255, 0.13) 45%,
+      transparent 78%
+    ),
+    linear-gradient(
+      to top,
+      rgba(88, 197, 255, 0.18) 0%,
+      rgba(88, 197, 255, 0.07) 45%,
+      transparent 100%
+    );
+  transition: opacity var(--ambient-fade-in) cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.knots-ambient-light.active {
+  opacity: var(--ambient-opacity);
+  animation: knots-ambient-breathe var(--ambient-breathe) ease-in-out var(--ambient-fade-in) infinite;
+}
+
+/* Under-glow for the Connect button: a soft cone of blue light that
+   starts below the button and bleeds down to meet the ambient layer. */
+.knots-connect-glow {
+  position: absolute;
+  left: 50%;
+  top: 330px;
+  bottom: 0;
+  width: 640px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+  filter: blur(6px);
+  will-change: opacity;
+  background:
+    radial-gradient(
+      ellipse 52% 46% at 50% 4%,
+      rgba(88, 197, 255, 0.23) 0%,
+      rgba(88, 197, 255, 0.08) 45%,
+      transparent 80%
+    ),
+    linear-gradient(
+      to bottom,
+      rgba(88, 197, 255, 0.07) 0%,
+      rgba(88, 197, 255, 0.02) 45%,
+      transparent 100%
+    );
+  transition: opacity var(--ambient-fade-in) cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.knots-connect-glow.active {
+  opacity: 1;
+  animation: knots-ambient-breathe-strong var(--ambient-breathe) ease-in-out var(--ambient-fade-in) infinite;
+}
+
+/* =====================================================================
+   Glass buttons — semi-transparent, soft reflections, stronger blur
+   on hover. Used by the mode selectors on Dashboard & Settings.
+   ===================================================================== */
+.knots-glass-btn {
+  position: relative;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10);
+  color: var(--text-secondary);
+  overflow: hidden;
+  transition:
+    background 200ms var(--ease),
+    border-color 200ms var(--ease),
+    color 200ms var(--ease),
+    backdrop-filter 300ms var(--ease),
+    box-shadow 300ms var(--ease);
+}
+
+.knots-glass-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    120deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.08) 35%,
+    rgba(255, 255, 255, 0.02) 55%,
+    transparent 100%
+  );
+  opacity: 0;
+  transition: opacity 300ms var(--ease);
+}
+
+.knots-glass-btn:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 4px 20px rgba(0, 0, 0, 0.25);
+}
+
+.knots-glass-btn:hover::before {
+  opacity: 1;
+}
+
+.knots-glass-btn.is-active {
+  background: var(--glass-accent);
+  border-color: rgba(61, 181, 255, 0.25);
+  color: var(--accent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.15),
+    0 4px 18px rgba(61, 181, 255, 0.11);
+}
+
+.knots-glass-btn.is-active:hover {
+  background: var(--glass-accent-strong);
+}

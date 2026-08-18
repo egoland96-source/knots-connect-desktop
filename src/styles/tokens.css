@@ -1,0 +1,191 @@
+:root {
+  /* ===== Arkaplanlar (Midnight Blue) ===== */
+  --bg-root: #07111E;
+  --bg-1: #0B1628;
+  --bg-2: #0D1A2E;
+  --bg-elevated: #101E36;
+  /* Knots brand background: Midnight Blue vertical gradient — never black, never white */
+  --bg-gradient: linear-gradient(180deg, #07111E 0%, #0B1628 50%, #0E1C30 100%);
+
+  /* ===== Surfaces / Kartlar ===== */
+  --surface-1: #0F1828;
+  --surface-2: #141E30;
+  --surface-3: #1A263C;
+  --surface-hover: #1E2D44;
+  --surface-active: #22324A;
+
+  /* ===== Accent - Midnight Blue Palette (3 ana renk) ===== */
+  --accent: #3DB5FF;
+  --accent-hover: #63C9FF;
+  --accent-active: #2FA0E8;
+  --accent-glow: rgba(61, 181, 255, 0.18);
+  --accent-glow-strong: rgba(61, 181, 255, 0.30);
+  --accent-subtle: rgba(61, 181, 255, 0.06);
+
+  /* ===== Connected Glow (Knots signature) ===== */
+  --connected-glow: #58C5FF;
+
+  /* ===== Status Colors ===== */
+  --success: #2ED573;
+  --success-hover: #5AE08A;
+  --success-glow: rgba(46, 213, 115, 0.18);
+  --success-subtle: rgba(46, 213, 115, 0.06);
+  --warning: #FFB020;
+  --warning-glow: rgba(255, 176, 32, 0.18);
+  --warning-subtle: rgba(255, 176, 32, 0.06);
+  --danger: #EF4444;
+  --danger-glow: rgba(239, 68, 68, 0.18);
+  --danger-subtle: rgba(239, 68, 68, 0.06);
+
+  /* ===== Text ===== */
+  --text-primary: #FFFFFF;
+  --text-secondary: #CBD5E1;
+  --text-tertiary: #94A3B8;
+  --text-muted: #64748B;
+  --text-inverse: #060B14;
+
+  /* ===== Borders ===== */
+  --border-subtle: rgba(255, 255, 255, 0.05);
+  --border-default: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.12);
+  --border-focus: rgba(61, 181, 255, 0.6);
+  --border-hover: rgba(61, 181, 255, 0.25);
+  --border-accent: rgba(61, 181, 255, 0.18);
+
+  /* ===== Glassmorphism (iOS 26 Liquid Glass) ===== */
+  --glass-bg: rgba(10, 16, 28, 0.35);
+  --glass-bg-strong: rgba(10, 16, 28, 0.55);
+  --glass-bg-light: rgba(10, 16, 28, 0.18);
+  --glass-border: rgba(255, 255, 255, 0.04);
+  --glass-border-strong: rgba(255, 255, 255, 0.09);
+  --glass-blur: blur(28px);
+  --glass-blur-strong: blur(48px);
+  --glass-blur-light: blur(18px);
+  --glass-shadow: 0 4px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06);
+  --glass-shadow-hover: 0 8px 36px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.10);
+  --glass-accent: rgba(61, 181, 255, 0.10);
+  --glass-accent-strong: rgba(61, 181, 255, 0.18);
+  --glass-highlight: rgba(255, 255, 255, 0.03);
+
+  /* ===== Glass Cards / Panels (floating glass) ===== */
+  --glass-card-bg: rgba(18, 25, 40, 0.55);
+  --glass-card-bg-strong: rgba(18, 25, 40, 0.60);
+  --glass-card-bg-light: rgba(18, 25, 40, 0.45);
+  --glass-card-blur: blur(20px);
+  --glass-card-blur-hover: blur(28px);
+  --glass-card-border: rgba(255, 255, 255, 0.06);
+  --glass-card-shadow: 0 12px 40px rgba(0, 0, 0, 0.30), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  --glass-card-shadow-hover: 0 20px 56px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+
+  /* ===== Ambient Connection Light (Knots Signature) ===== */
+  --ambient-opacity: 0.05;
+  --ambient-opacity-breathe: 0.06;
+  --ambient-fade-in: 700ms;
+  --ambient-breathe: 7s;
+  --ambient-blue-soft: rgba(88, 197, 255, 0.08);
+  --ambient-blue-base: rgba(88, 197, 255, 0.13);
+
+  /* ===== Shadows (Layered, premium) ===== */
+  --shadow-xs: 0 1px 2px rgba(0,0,0,0.25);
+  --shadow-sm: 0 2px 8px rgba(0,0,0,0.30);
+  --shadow-card: 0 4px 20px rgba(0,0,0,0.32), 0 1px 4px rgba(0,0,0,0.24);
+  --shadow-card-hover: 0 8px 32px rgba(0,0,0,0.40), 0 2px 8px rgba(0,0,0,0.28);
+  --shadow-lg: 0 16px 48px rgba(0,0,0,0.45), 0 4px 16px rgba(0,0,0,0.30);
+  --shadow-pop: 0 24px 64px rgba(0,0,0,0.50), 0 8px 24px rgba(0,0,0,0.35);
+  --shadow-glow-accent: 0 0 28px rgba(61, 181, 255, 0.17);
+  --shadow-glow-accent-strong: 0 0 48px rgba(61, 181, 255, 0.27);
+  --shadow-glow-success: 0 0 28px rgba(46, 213, 115, 0.17);
+  --shadow-glow-warning: 0 0 28px rgba(255, 176, 32, 0.17);
+  --shadow-inner: inset 0 2px 4px rgba(0,0,0,0.25);
+
+  /* ===== Spacing (8px base grid) ===== */
+  --space-0: 0;
+  --space-px: 1px;
+  --space-0_5: 4px;
+  --space-1: 8px;
+  --space-1_5: 12px;
+  --space-2: 16px;
+  --space-2_5: 20px;
+  --space-3: 24px;
+  --space-3_5: 28px;
+  --space-4: 32px;
+  --space-5: 40px;
+  --space-6: 48px;
+  --space-7: 56px;
+  --space-8: 64px;
+  --space-9: 80px;
+  --space-10: 96px;
+
+  /* ===== Radius (Consistent) ===== */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-2xl: 24px;
+  --radius-full: 9999px;
+
+  /* ===== Typography (Fluid scale) ===== */
+  --font-family: 'Inter Variable', 'Inter', -apple-system, 'BlinkMacSystemFont', 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --font-ui: var(--font-family);
+
+  --text-xs: clamp(0.6875rem, 0.65rem + 0.1875vw, 0.75rem);
+  --text-sm: clamp(0.8125rem, 0.765rem + 0.2375vw, 0.875rem);
+  --text-base: clamp(0.9375rem, 0.875rem + 0.3125vw, 1rem);
+  --text-lg: clamp(1.0625rem, 0.98rem + 0.4125vw, 1.125rem);
+  --text-xl: clamp(1.25rem, 1.125rem + 0.625vw, 1.5rem);
+  --text-2xl: clamp(1.5rem, 1.3rem + 1vw, 2rem);
+  --text-3xl: clamp(1.875rem, 1.55rem + 1.625vw, 2.5rem);
+  --text-4xl: clamp(2.25rem, 1.8rem + 2.25vw, 3rem);
+
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  --line-height-tight: 1.15;
+  --line-height-snug: 1.35;
+  --line-height-normal: 1.55;
+  --line-height-relaxed: 1.7;
+
+  --font-family: 'Inter Variable', 'Inter', -apple-system, 'BlinkMacSystemFont', 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* ===== Motion (Premium spring/easeOut) ===== */
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-spring-gentle: cubic-bezier(0.4, 1.4, 0.6, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+
+  --dur-50: 50ms;
+  --dur-100: 100ms;
+  --dur-150: 150ms;
+  --dur-200: 200ms;
+  --dur-250: 250ms;
+  --dur-300: 300ms;
+  --dur-350: 350ms;
+  --dur-400: 400ms;
+  --dur-500: 500ms;
+  --dur-600: 600ms;
+  --dur-700: 700ms;
+  --dur-1000: 1000ms;
+
+  /* ===== Background Blur ===== */
+  --blur-blue: radial-gradient(ellipse 50% 40% at 15% 15%, rgba(61, 181, 255, 0.035) 0%, transparent 60%);
+  --blur-green: radial-gradient(ellipse 40% 35% at 85% 85%, rgba(46, 213, 115, 0.025) 0%, transparent 60%);
+  --blur-subtle: radial-gradient(circle at 50% 50%, rgba(61, 181, 255, 0.018) 0%, transparent 70%);
+
+  /* ===== Z-Index Scale ===== */
+  --z-base: 0;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-modal-backdrop: 300;
+  --z-modal: 400;
+  --z-popover: 500;
+  --z-tooltip: 600;
+  --z-toast: 700;
+  --z-max: 9999;
+}
+

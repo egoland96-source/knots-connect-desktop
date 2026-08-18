@@ -1,0 +1,56 @@
+# Dependencies & build output
+node_modules/
+dist/
+release/
+out/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Legacy engine code (unused; kept locally only)
+backend/
+go-backend/
+bin/
+
+# Engine binaries (build-time artifacts, kept locally)
+backend/k_main.exe
+backend/k_main.exe~
+backend/WinDivert.dll
+backend/WinDivert64.sys
+backend/build/
+backend/*.spec
+backend/*.pyc
+backend/__pycache__/
+
+# Scratch probe files
+probe*.json
+probe*.txt
+probe_*.json
+
+# Android build outputs & scratch
+mobile/android/app/build/
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/android/*.txt
+mobile/android/screen.png
+mobile/android/start-emulator*.bat
+mobile/android/start-download.bat
+mobile/android/setup-emulator.bat
+mobile/android/run-emulator-test.bat
+screenshot.png
+*.apk
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.vs/
+
+# Runtime state files (written by the engine bridge, not source)
+src/pages/Settings/**/*.json
+
+# Env
+.env
+.env.local
