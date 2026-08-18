@@ -1,6 +1,5 @@
 import type { User, AuthResponse, LoginRequest, RegisterRequest } from '../../types/auth.types';
-
-const API_BASE = 'https://vsvpn-api.onrender.com';
+import { API_BASE } from '../../config/apiEndpoint';
 
 class AuthAPI {
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {

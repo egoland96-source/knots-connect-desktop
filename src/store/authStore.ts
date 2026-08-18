@@ -2,8 +2,7 @@ import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import axios, { AxiosError, AxiosInstance } from 'axios';
 import type { User, AuthResponse, LoginRequest, RegisterRequest, SubscriptionPlan } from '../types/auth.types';
-
-const API_BASE = 'https://vsvpn-api.onrender.com';
+import { API_BASE } from '../config/apiEndpoint';
 
 interface ApiEnvelope {
   success: boolean;

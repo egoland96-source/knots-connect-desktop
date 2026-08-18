@@ -9,6 +9,7 @@ import type {
   DataSavedDay,
 } from '../privacy';
 import { createPrivacyEngineInstance, emptyStats, bytesSavedForCategory, loadHistory, recordBlock, clearHistory } from '../privacy';
+import { API_BASE } from '../config/apiEndpoint';
 
 export type CategoryToggle = 'ads' | 'tracker' | 'malware' | 'phishing';
 
@@ -253,7 +254,7 @@ export const usePrivacyStore = create<PrivacyStoreState>()((set, get) => {
       try {
         const token = await window.knotsAuth?.getToken();
         if (!token || token.startsWith('guest_')) return;
-        const res = await fetch('https://vsvpn-api.onrender.com/api/v1/lists', {
+        const res = await fetch(`${API_BASE}/api/v1/lists`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) return;
