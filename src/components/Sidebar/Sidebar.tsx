@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { LayoutDashboard, Server, BarChart3, Settings, User, ShieldCheck, LogOut } from 'lucide-react';
+import { LayoutDashboard, Server, BarChart3, Settings, User, LogOut } from 'lucide-react';
 import { useConnectionStore } from '../../store/connectionStore';
 import { useAuthStore } from '../../store/authStore';
 import type { PageKey, SidebarProps } from './Sidebar.types';
@@ -51,22 +51,19 @@ export const Sidebar = React.memo(({ activePage, onNavigate }: SidebarProps) => 
     >
 {/* LOGO */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 var(--space-2)', marginBottom: 'var(--space-6)' }}>
-        <motion.div
+        <motion.img
+          src="/logo.png"
+          alt="Knots Connect"
           whileHover={{ rotate: 8, scale: 1.05 }}
           transition={{ duration: 0.2 }}
           style={{
             width: 36,
             height: 36,
             borderRadius: 11,
-            background: 'linear-gradient(135deg, var(--accent), var(--accent-active))',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
+            objectFit: 'cover',
             boxShadow: '0 4px 14px rgba(61,181,255,0.18)',
           }}
-        >
-          <ShieldCheck size={20} strokeWidth={2} color="var(--text-inverse)" />
-        </motion.div>
+        />
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '0.3px', color: 'var(--text-primary)' }}>Knots Connect</div>
           <div style={{ fontSize: 10, color: 'var(--accent)', letterSpacing: '1px', fontWeight: 600 }}>Secure Internet</div>
