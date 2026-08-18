@@ -14,6 +14,9 @@
     "appId": "com.knotsconnect.desktop",
     "productName": "Knots Connect",
     "icon": "build/icon.ico",
+    "directories": {
+      "output": "release"
+    },
     "publish": {
       "provider": "github",
       "owner": "egoland96-source",
