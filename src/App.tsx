@@ -17,7 +17,7 @@ import { usePrivacyStore } from './store/privacyStore';
 import { useAuthStore } from './store/authStore';
 import { useNavStore } from './store/navStore';
 
-type UpdateState = { status: 'downloading' | 'ready'; version: string } | null;
+type UpdateState = { status: 'downloading' | 'ready' | 'error'; version?: string; detail?: string } | null;
 
 const PAGES: Record<PageKey, React.ComponentType> = {
   dashboard: Dashboard,
@@ -133,9 +133,10 @@ export const App = () => {
               }}
             >
               <span style={{ flex: 1, minWidth: 0 }}>
-                {updateState.status === 'downloading'
-                  ? `Downloading update v${updateState.version}…`
-                  : `Update v${updateState.version} ready — restart to install.`}
+                {updateState.status === 'downloading' && `Downloading update v${updateState.version}…`}
+                {updateState.status === 'ready' && `Update v${updateState.version} ready — restart to install.`}
+                {updateState.status === 'error' &&
+                  `Update check failed${updateState.detail ? `: ${updateState.detail}` : ''} — please try again later.`}
               </span>
               {updateState.status === 'ready' && (
                 <button

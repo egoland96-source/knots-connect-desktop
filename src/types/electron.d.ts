@@ -63,7 +63,7 @@ export interface KnotsBridgeApi {
   privacy?: PrivacyBridgeApi;
 
   // === OTOMATİK GÜNCELLEME ===
-  onUpdateStatus?: (callback: (info: { status: 'downloading' | 'ready'; version: string }) => void) => () => void;
+  onUpdateStatus?: (callback: (info: { status: 'downloading' | 'ready' | 'error'; version: string; detail?: string }) => void) => () => void;
   installUpdate?: () => Promise<void>;
 }
 

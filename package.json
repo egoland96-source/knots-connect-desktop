@@ -1,93 +1,93 @@
 {
-    "name":  "knots-connect-desktop",
-    "version":  "1.0.5",
-    "description":  "Knots Connect - Electron + React masaÃ¼stÃ¼ istemcisi",
-    "main":  "electron/main.cjs",
-    "scripts":  {
-                    "dev":  "concurrently -k \"vite\" \"npm:electron:dev\"",
-                    "electron:dev":  "wait-on http://127.0.0.1:5173 \u0026\u0026 cross-env ELECTRON_START_URL=http://127.0.0.1:5173 electron .",
-                    "typecheck":  "tsc --noEmit -p tsconfig.json",
-                    "build":  "vite build",
-                    "build:win":  "npm run typecheck \u0026\u0026 npm run build \u0026\u0026 electron-builder --win --x64",
-                    "pack:zip":  "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pack-zip.ps1"
-                },
-    "build":  {
-                  "appId":  "com.knotsconnect.desktop",
-                  "productName":  "Knots Connect",
-                  "icon":  "build/icon.ico",
-                  "directories":  {
-                                      "output":  "release"
-                                  },
-                  "files":  [
-                                "dist/**/*",
-                                "electron/**/*",
-                                "package.json",
-                                "!node_modules/**/*",
-                                "node_modules/keytar/**/*"
-                            ],
-                  "asarUnpack":  [
-                                     "node_modules/keytar/**/*"
-                                 ],
-                  "extraResources":  [
-                                         {
-                                             "from":  "build/icon.ico",
-                                             "to":  "icon.ico"
-                                         },
-                                         {
-                                             "from":  "electron/knots-update.ps1",
-                                             "to":  "knots-update.ps1"
-                                         },
-                                         {
-                                             "from":  "backend",
-                                             "to":  "backend",
-                                             "filter":  [
-                                                            "k_main.exe",
-                                                            "WinDivert.dll",
-                                                            "WinDivert64.sys",
-                                                            "blacklist.txt",
-                                                            "adblock_config.json",
-                                                            "adblock_blacklist.txt",
-                                                            "adblock_whitelist.txt",
-                                                            "adblock_observed.json",
-                                                            "adblock_lists/**/*",
-                                                            "!dist/**/*",
-                                                            "!build/**/*",
-                                                            "!__pycache__/**/*",
-                                                            "!*.log",
-                                                            "!*.py",
-                                                            "!*.spec",
-                                                            "!k_main.exe~"
-                                                        ]
-                                         }
-                                     ],
-                  "win":  {
-                              "target":  [
-                                             "dir"
-                                         ],
-                              "requestedExecutionLevel":  "requireAdministrator"
-                          },
-                  "npmRebuild":  false
-              },
-    "dependencies":  {
-                         "axios":  "^1.7.2",
-                         "framer-motion":  "^12.43.0",
-                         "immer":  "^11.1.15",
-                         "keytar":  "^7.9.0",
-                         "lucide-react":  "^1.28.0",
-                         "react":  "^18.3.1",
-                         "react-dom":  "^18.3.1",
-                         "zustand":  "^4.5.2"
-                     },
-    "devDependencies":  {
-                            "@types/react":  "^18.3.3",
-                            "@types/react-dom":  "^18.3.0",
-                            "@vitejs/plugin-react":  "^4.3.1",
-                            "concurrently":  "^8.2.2",
-                            "cross-env":  "^7.0.3",
-                            "electron":  "^31.0.2",
-                            "electron-builder":  "^24.13.3",
-                            "typescript":  "^5.5.2",
-                            "vite":  "^5.3.1",
-                            "wait-on":  "^7.2.0"
-                        }
+    "name": "knots-connect-desktop",
+    "version": "1.0.6",
+    "description": "Knots Connect - Electron + React masaÃ¼stÃ¼ istemcisi",
+    "main": "electron/main.cjs",
+    "scripts": {
+        "dev": "concurrently -k \"vite\" \"npm:electron:dev\"",
+        "electron:dev": "wait-on http://127.0.0.1:5173 && cross-env ELECTRON_START_URL=http://127.0.0.1:5173 electron .",
+        "typecheck": "tsc --noEmit -p tsconfig.json",
+        "build": "vite build",
+        "build:win": "npm run typecheck && npm run build && electron-builder --win --x64",
+        "pack:zip": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pack-zip.ps1"
+    },
+    "build": {
+        "appId": "com.knotsconnect.desktop",
+        "productName": "Knots Connect",
+        "icon": "build/icon.ico",
+        "directories": {
+            "output": "release"
+        },
+        "files": [
+            "dist/**/*",
+            "electron/**/*",
+            "package.json",
+            "!node_modules/**/*",
+            "node_modules/keytar/**/*"
+        ],
+        "asarUnpack": [
+            "node_modules/keytar/**/*"
+        ],
+        "extraResources": [
+            {
+                "from": "build/icon.ico",
+                "to": "icon.ico"
+            },
+            {
+                "from": "electron/knots-update.ps1",
+                "to": "knots-update.ps1"
+            },
+            {
+                "from": "backend",
+                "to": "backend",
+                "filter": [
+                    "k_main.exe",
+                    "WinDivert.dll",
+                    "WinDivert64.sys",
+                    "blacklist.txt",
+                    "adblock_config.json",
+                    "adblock_blacklist.txt",
+                    "adblock_whitelist.txt",
+                    "adblock_observed.json",
+                    "adblock_lists/**/*",
+                    "!dist/**/*",
+                    "!build/**/*",
+                    "!__pycache__/**/*",
+                    "!*.log",
+                    "!*.py",
+                    "!*.spec",
+                    "!k_main.exe~"
+                ]
+            }
+        ],
+        "win": {
+            "target": [
+                "dir"
+            ],
+            "requestedExecutionLevel": "requireAdministrator"
+        },
+        "npmRebuild": false
+    },
+    "dependencies": {
+        "axios": "^1.7.2",
+        "framer-motion": "^12.43.0",
+        "immer": "^11.1.15",
+        "keytar": "^7.9.0",
+        "lucide-react": "^1.28.0",
+        "react": "^18.3.1",
+        "react-dom": "^18.3.1",
+        "zustand": "^4.5.2"
+    },
+    "devDependencies": {
+        "@types/react": "^18.3.3",
+        "@types/react-dom": "^18.3.0",
+        "@vitejs/plugin-react": "^4.3.1",
+        "concurrently": "^8.2.2",
+        "cross-env": "^7.0.3",
+        "electron": "^31.0.2",
+        "electron-builder": "^24.13.3",
+        "typescript": "^5.5.2",
+        "vite": "^5.3.1",
+        "wait-on": "^7.2.0"
+    }
 }

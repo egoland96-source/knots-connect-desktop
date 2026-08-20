@@ -111,10 +111,12 @@ async function checkForUpdates(onStatus) {
     fs.mkdirSync(stagedDir, { recursive: true });
     extractZip(zipPath, stagedDir);
     fs.rmSync(zipPath, { force: true });
+    downloading = false;
     onStatus({ status: 'ready', version: latest });
   } catch (err) {
     console.error('[updater]', err.message);
     downloading = false;
+    stagedDir = null;
     onStatus({ status: 'error', detail: err.message });
   }
 }
