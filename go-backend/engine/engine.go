@@ -13,8 +13,34 @@
 package engine
 
 import (
+	"regexp"
+	"strings"
 	"time"
 )
+
+// Oyun havuzu SNI deseni: Roblox oyun sunucusu pool host adları
+// "<bölge>-<ip-kısa çizgili>.roblox.com" biçimindedir, ör.:
+//   lax4-128-116-63-3.roblox.com
+//   iad5-44-197-17-243.roblox.com
+// Bu akışlar oyun join'inin kritik el sıkışmasıdır; küresel skor çöküşünden
+// (hold/passthrough dahil) muaf tutulur ve LEADER-BY-EVIDENCE stratejisiyle
+// işlenir — "oyun-pool hafızası": ne çalıştıysa onunla devam et.
+var gamePoolRe = regexp.MustCompile(`-\d+-\d+-\d+-\d+\.roblox\.com$`)
+
+// Ek oyun-ulaşım hostları (DNS ile doğrulandı): voice.roblox.com CNAME
+// olarak edge-term4-ams2.roblox.com → 128.116.21.3 (oyun edge IP) çözülür;
+// SNI her zaman ORİJİNAL hostname olarak kalır (CNAME değil), bu yüzden
+// regex bunları yakalamaz. Log'da voice.roblox.com 128.116.44.3'e (fra4
+// edge) gidip split2/split3 ile 12 sn timeout yiyordu — DPI bunu oyun
+// sunucusu olarak tanıyor. Aynı kategoride işlenir.
+var gamePoolHosts = map[string]bool{
+	"voice.roblox.com": true,
+}
+
+func isGamePoolHost(sni string) bool {
+	sni = strings.ToLower(sni)
+	return gamePoolHosts[sni] || gamePoolRe.MatchString(sni)
+}
 
 // FlowKeyFactory, bir ham paketten FlowKey üretir (main'in header parse'ına
 // bağımlılığı azaltmak için burada saf offsets ile çalışan versiyon vardır).
@@ -61,24 +87,38 @@ type Engine struct {
 	finish   chan struct{}
 	tickDur  time.Duration
 	saveTick int // profil kaydı sayacı
+
+	// Oyun-pool hafızası: pool SNI'larına uygulanacak strateji seçimi.
+	poolFallback string // lider yoksa kullanılacak varsayılan strateji
+	poolFlows    int    // işlenen toplam pool akışı (log hız sınırı)
 }
 
 // NewEngine, registry'yi kurar ve monitor'ü aynı registry'ye bağlar.
 func NewEngine() *Engine {
 	reg := NewRegistry()
 	return &Engine{
-		Registry: reg,
-		Selector: &Selector{},
-		Monitor:  NewMonitor(reg),
-		Store:    NewStateStore(),
-		finish:   make(chan struct{}),
-		tickDur:  5 * time.Second,
+		Registry:     reg,
+		Selector:     &Selector{},
+		Monitor:      NewMonitor(reg),
+		Store:        NewStateStore(),
+		finish:       make(chan struct{}),
+		tickDur:      5 * time.Second,
+		poolFallback: "split3", // tarihsel olarak oyun-pool'un kazananı
 	}
 }
 
 // Register, stratejiyi registry'ye ekler.
 func (e *Engine) Register(s Strategy) {
 	e.Registry.Register(s)
+}
+
+// SetPoolFallback, oyun-pool SNI'ları için kullanılacak varsayılan stratejiyi
+// değiştirir (global bypass modunda yalnızca yüksek skorlu tek bir strateji
+// kayıtlıysa poolFallback'i ona yönlendirmek gerekir).
+func (e *Engine) SetPoolFallback(id string) {
+	if e.Registry.Has(id) {
+		e.poolFallback = id
+	}
 }
 
 // Start, mevcut ağ profilini yükler ve periyodik bakım döngüsünü başlatır.
@@ -100,6 +140,9 @@ func (e *Engine) Stop() {
 }
 
 // bestStrategy, güncel en yüksek skorlu (cooldown dışı) strateji id'dir.
+// Anti-cascade: boş çıksa bile asla "passthrough" dönmez — önce kanıtlı
+// lider, o da yoksa ilk kayıtlı strateji. Profile passthrough'un yazılması
+// yasaklanır; aksi halde bir sonraki oturum çöküşle başlar.
 func (e *Engine) bestStrategy(now time.Time) string {
 	best := ""
 	bestScore := -1e9
@@ -114,9 +157,41 @@ func (e *Engine) bestStrategy(now time.Time) string {
 		}
 	}
 	if best == "" {
-		best = "passthrough"
+		best = e.Registry.LeaderByEvidence(now, false)
+	}
+	if best == "" {
+		if all := e.Registry.All(); len(all) > 0 {
+			best = all[0].Strategy.Metadata().ID
+		}
 	}
 	return best
+}
+
+// poolStrategy, oyun-pool akışları için strateji seçer: cooldown dışı en
+// yüksek skorlu strateji; yoksa tarihsel kazanan (split3). Selector/hold
+// baypas edilir — oyun join'i asla passthrough'a kurban edilmez.
+func (e *Engine) poolStrategy(now time.Time) (Strategy, bool) {
+	best, bestScore := "", -1e9
+	for _, swh := range e.Registry.All() {
+		if swh.Health.InCooldown(now) {
+			continue
+		}
+		if sc := swh.Health.Score(now); sc > bestScore {
+			bestScore = sc
+			best = swh.Strategy.Metadata().ID
+		}
+	}
+	if best != "" {
+		if s, _, ok := e.Registry.Get(best); ok {
+			return s, true
+		}
+	}
+	// Herkes cooldown'daysa skoru hiç düşmeyen tarihsel kazanan kullanılır;
+	// cooldown baypas edilir çünkü oyun join'i kritik akıştır.
+	if s, _, ok := e.Registry.Get(e.poolFallback); ok {
+		return s, true
+	}
+	return nil, false
 }
 
 // HandleOutbound, giden TLS paketini strateji seçimiyle işler.
@@ -128,7 +203,22 @@ func (e *Engine) HandleOutbound(info PacketInfo, raw, addr []byte, send SendFunc
 	}
 
 	now := time.Now()
-	strategy, ok := e.Selector.Select(e.Registry, info, now)
+
+	// SNI bazlı oyun-pool tespiti: join el sıkışmalarına sabit strateji.
+	sni := clientHelloSNI(raw)
+	isPool := sni != "" && isGamePoolHost(sni)
+
+	var strategy Strategy
+	ok := false
+	if isPool {
+		strategy, ok = e.poolStrategy(now)
+		e.poolFlows++
+		if e.poolFlows%25 == 1 {
+			logf("[engine] oyun havuzu: %s -> %s (sabit, port %d, toplam %d akış)", sni, strategy.Metadata().ID, info.DstPort, e.poolFlows)
+		}
+	} else {
+		strategy, ok = e.Selector.Select(e.Registry, info, now)
+	}
 	if !ok {
 		return false, nil
 	}
@@ -143,11 +233,12 @@ func (e *Engine) HandleOutbound(info PacketInfo, raw, addr []byte, send SendFunc
 	// SNI eşleşmeyen trafik stratejiyi cezalandırmasın.
 	if handled {
 		if fk, ok := (FlowKeyFactory{}).Make(raw); ok {
+			fk.RemoteIP = ipStr(raw, 16, 20)
 			fk.Strategy = strategy.Metadata().ID
 			e.Monitor.BeginFlow(fk)
 		}
 		if _, h, ok := e.Registry.Get(strategy.Metadata().ID); ok {
-			logf("[engine] strateji seçildi: %s (skor %.1f)", strategy.Metadata().ID, h.Score(now))
+			logf("[engine] strateji seçildi: %s (skor %.1f, SNI %s, hedef %s)", strategy.Metadata().ID, h.Score(now), sni, ipStr(raw, 16, 20))
 		}
 	}
 	return handled, nil

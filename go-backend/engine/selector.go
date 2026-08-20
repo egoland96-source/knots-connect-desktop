@@ -9,13 +9,24 @@ import (
 	"time"
 )
 
+// Anti-cascade sabitleri: kanıtsız (taze) bir strateji, kanıtlı lideri ancak
+// açık farkla geçerse tahtından edebilir. Aksi halde DPI zehirlenmesinde
+// tüm stratejiler sırayla yakılıp passthrough çöküşüne gidilir.
+const (
+	minDethroneEvidence = 3    // tahttan indirmek için gereken asgari kanıt
+	anchorSlack         = 12.0 // liderin korunma payı (puan)
+)
+
 // Selector, registry'den en iyi uyumlu stratejiyi seçer.
 type Selector struct{}
 
 // Select, paket bilgisine uygun, cooldown'da olmayan en yüksek skorlu
 // stratejiyi döner. Uygun aday yoksa veya hepsi cooldown'daysa nil döner
-// (çağıran passthrough eder).
+// (çağıran passthrough eder). Küresel hold aktifken de passthrough önerir.
 func (s *Selector) Select(reg *Registry, info PacketInfo, now time.Time) (Strategy, bool) {
+	if reg.InHold(now) {
+		return nil, false
+	}
 	candidates := reg.Compatible(info)
 	if len(candidates) == 0 {
 		return nil, false
@@ -38,5 +49,20 @@ func (s *Selector) Select(reg *Registry, info PacketInfo, now time.Time) (Strate
 	if bestIdx == -1 {
 		return nil, false
 	}
-	return candidates[bestIdx].Strategy, true
+	best := candidates[bestIdx]
+
+	// Anti-cascade anchor: seçilen aday kanıtsızsa ve kanıtlı bir lider
+	// varsa, aday lideri açık farkla geçmedikçe lider korunur. Böylece
+	// zehirli pencerede taze stratejiler sırayla yakılmaz; lider cooldown'a
+	// girdiyse yenisi zaten devreye girer (keşif yolu açık kalır).
+	if best.Health.Observed() < minDethroneEvidence {
+		if lid := reg.LeaderByEvidence(now, true); lid != "" && lid != best.Strategy.Metadata().ID {
+			if ls, lh, ok := reg.Get(lid); ok && lh.Observed() >= minDethroneEvidence {
+				if lh.Score(now) >= bestScore-anchorSlack {
+					return ls, true
+				}
+			}
+		}
+	}
+	return best.Strategy, true
 }

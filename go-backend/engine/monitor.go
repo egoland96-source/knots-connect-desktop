@@ -23,6 +23,7 @@ type FlowKey struct {
 	SrcPort  int
 	DstPort  int
 	Strategy string // bu akışta hangi strateji uygulandı
+	RemoteIP string // gerçek uzak (sunucu) IP — log görünürlüğü için
 }
 
 // flowRecord, izlenen bir akışın durumudur.
@@ -80,7 +81,8 @@ func (m *Monitor) Observe(pkt PacketInfo, raw []byte) {
 			latency := time.Since(rec.startedAt)
 			if _, h, ok := m.registry.Get(k.Strategy); ok {
 				h.RecordSuccess(latency.Seconds() * 1000)
-				logf("[monitor] strateji %s BAŞARILI (%s → cevap %dms)", k.Strategy, k.DstIP, int(latency.Milliseconds()))
+				m.registry.NoteOutcome(true)
+				logf("[monitor] strateji %s BAŞARILI (%s → cevap %dms)", k.Strategy, remoteIP(k), int(latency.Milliseconds()))
 			}
 			delete(m.flows, k)
 			return
@@ -91,7 +93,8 @@ func (m *Monitor) Observe(pkt PacketInfo, raw []byte) {
 			rec.seenReply = true
 			if _, h, ok := m.registry.Get(k.Strategy); ok {
 				h.RecordFailure()
-				logf("[monitor] strateji %s BAŞARISIZ: RST (%s)", k.Strategy, k.DstIP)
+				m.registry.NoteOutcome(false)
+				logf("[monitor] strateji %s BAŞARISIZ: RST (%s)", k.Strategy, remoteIP(k))
 			}
 			delete(m.flows, k)
 			return
@@ -110,7 +113,8 @@ func (m *Monitor) Expire(now time.Time) int {
 		if age > m.handshakeT {
 			if _, h, ok := m.registry.Get(k.Strategy); ok {
 				h.RecordFailure()
-				logf("[monitor] strateji %s BAŞARISIZ: zaman aşımı (%s, %ds)", k.Strategy, k.DstIP, int(age.Seconds()))
+				m.registry.NoteOutcome(false)
+				logf("[monitor] strateji %s BAŞARISIZ: zaman aşımı (%s, %ds)", k.Strategy, remoteIP(k), int(age.Seconds()))
 			}
 			delete(m.flows, k)
 			failed++
@@ -150,6 +154,15 @@ func sameFlow(k FlowKey, pkt PacketInfo, raw []byte) bool {
 
 func ipStr(raw []byte, a, b int) string {
 	return fmt.Sprintf("%d.%d.%d.%d", raw[a], raw[a+1], raw[a+2], raw[a+3])
+}
+
+// remoteIP, monitor logları için gerçek uzak IP'yi döner. FlowKey yön-bağımsız
+// sıralandığı için DstIP lokal IP olabilir; RemoteIP her zaman sunucu IP'dir.
+func remoteIP(k FlowKey) string {
+	if k.RemoteIP != "" {
+		return k.RemoteIP
+	}
+	return k.DstIP
 }
 
 func ports(raw []byte, pkt PacketInfo) (int, int) {

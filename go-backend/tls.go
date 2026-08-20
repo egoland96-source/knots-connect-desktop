@@ -122,3 +122,66 @@ func findApproxSNIOffset(payload []byte) int {
 	}
 	return -1
 }
+
+// findSniHostnameRange, ClientHello içinde SNI hostname baytlarının başlangıcını
+// ve uzunluğunu döner. ExtractSNI'nin offset bilgisini veren uzantısıdır —
+// SNI'yi TAM ORTASINDAN bölmek (GoodbyeDPI -k felsefesi) için gerekir:
+// hiçbir parça tek başına hostname'i taşımaz, DPI segment bazlı eşleşme
+// yapıyorsa akışı video CDN'i olarak etiketleyemez.
+func findSniHostnameRange(payload []byte) (start, length int, ok bool) {
+	pos := 5
+	if len(payload) < 43 || payload[0] != 0x16 || payload[pos] != 0x01 {
+		return 0, 0, false
+	}
+	pos++
+	pos += 3 + 2 + 32
+
+	if pos >= len(payload) {
+		return 0, 0, false
+	}
+	sessionIDLen := int(payload[pos])
+	pos += 1 + sessionIDLen
+	if pos+2 > len(payload) {
+		return 0, 0, false
+	}
+	cipherSuitesLen := int(binary.BigEndian.Uint16(payload[pos : pos+2]))
+	pos += 2 + cipherSuitesLen
+	if pos >= len(payload) {
+		return 0, 0, false
+	}
+	compressionLen := int(payload[pos])
+	pos += 1 + compressionLen
+	if pos+2 > len(payload) {
+		return 0, 0, false
+	}
+	extensionsLen := int(binary.BigEndian.Uint16(payload[pos : pos+2]))
+	pos += 2
+	extensionsEnd := pos + extensionsLen
+
+	for pos+4 <= extensionsEnd && pos+4 <= len(payload) {
+		extType := binary.BigEndian.Uint16(payload[pos : pos+2])
+		extLen := int(binary.BigEndian.Uint16(payload[pos+2 : pos+4]))
+		extDataStart := pos + 4
+
+		if extType == 0x0000 { // server_name
+			if extDataStart+5 > len(payload) {
+				return 0, 0, false
+			}
+			listPos := extDataStart + 2
+			if listPos >= len(payload) || payload[listPos] != 0x00 {
+				return 0, 0, false
+			}
+			if listPos+3 > len(payload) {
+				return 0, 0, false
+			}
+			nameLen := int(binary.BigEndian.Uint16(payload[listPos+1 : listPos+3]))
+			nameStart := listPos + 3
+			if nameStart+nameLen > len(payload) {
+				return 0, 0, false
+			}
+			return nameStart, nameLen, true
+		}
+		pos = extDataStart + extLen
+	}
+	return 0, 0, false
+}

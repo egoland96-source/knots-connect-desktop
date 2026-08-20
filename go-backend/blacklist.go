@@ -65,11 +65,27 @@ func LoadBlacklist() []string {
 	return domains
 }
 
-// MatchesDomain, SNI hostname'inin blacklist'teki herhangi bir kelimeyi
-// İÇERİP içermediğini kontrol eder (contains matching, suffix değil):
-//   - "roblox.com" kuralı → api.roblox.com, games.roblox.com, sea1-....roblox.com
-// Alt domain desteği: "discord.com" kuralı "gateway.discord.com" SNI'sını yakalar.
+// webApiRobloxHost, DPI tarafından boğulmadığı kanıtlanmış (arayüz çalışıyor)
+// saf web API hostlarını işaretler. Bunları bölmek zararlıdır: join API seli
+// (ecsv2/ephemeralcounters/apis) 8-12 sn'lik timeout'larla tıkanır ve oyun
+// join'i tamamlanmaz. Passthrough'a bırakılırlar — web zaten filtresiz akar.
+func webApiRobloxHost(sni string) bool {
+	if strings.HasSuffix(sni, ".api.roblox.com") {
+		return true
+	}
+	switch sni {
+	case "apis.roblox.com", "api.roblox.com", "games.roblox.com", "game.roblox.com", "gamejoin.roblox.com":
+		return true
+	}
+	return false
+}
+
+// MatchesDomain, SNI hostname'inin blacklist'teki herhangi bir domain ile eşleşip eşleşmediğini kontrol eder.
+// Alt domain desteği: "roblox.com" kuralı "api.roblox.com" / "games.roblox.com"
+// / "sea1-....roblox.com" SNI'larını yakalar ("." + suffix).
+// Kısa kurallarla (ör. "x.com") yanlış eşleşme olmaz — "box.com" yakalanmaz.
 // Microsoft bypass sinyali: ilgili domainler filtrelenmez (Roblox hata kodu 2 önlemi).
+// Roblox web API'leri de filtrelenmez (join API seli passthrough olmalı).
 func MatchesDomain(sni string, blacklist []string) bool {
 	sni = strings.ToLower(sni)
 
@@ -81,8 +97,13 @@ func MatchesDomain(sni string, blacklist []string) bool {
 		}
 	}
 
+	// Roblox web API'leri asla bölünmez — join API seli boğulmasın.
+	if webApiRobloxHost(sni) {
+		return false
+	}
+
 	for _, target := range blacklist {
-		if strings.Contains(sni, target) {
+		if sni == target || strings.HasSuffix(sni, "."+target) {
 			return true
 		}
 	}

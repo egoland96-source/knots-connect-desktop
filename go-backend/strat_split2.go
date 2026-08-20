@@ -7,21 +7,47 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"knots-go-backend/engine"
 )
 
+// globalVideoSkips — eskiden global bypass modunda passthrough edilen video
+// CDN hostları. SNI-gizleyen splitv stratejisi gelince GEREKSİZ hale geldi:
+// passthrough full SNI gösterdiği için video CDN'leri yine boğuluyordu;
+// splitv ise hostname'i parçalar arasına yayarak DPI'ın eşleştirmesini
+// imkansızlaştırır. Liste boş bırakılır — splitv her şeye uygulanır.
+var globalVideoSkips []string
+
+// globalSkipMatch, SNI'nin video CDN muafiyet listesinde olup olmadığını
+// kontrol eder (tam veya alt domain eşleşmesi: "googlevideo.com" kuralı
+// "r5---sn-...googlevideo.com"u yakalar).
+func globalSkipMatch(sni string) bool {
+	sni = strings.ToLower(sni)
+	for _, s := range globalVideoSkips {
+		if sni == s || strings.HasSuffix(sni, "."+s) {
+			return true
+		}
+	}
+	return false
+}
+
 // Split2Strategy, ikili TLS ClientHello parçalama stratejisidir.
 type Split2Strategy struct {
 	blacklist []string
 	mode      int
+	force     bool // global bypass: blacklist'e bakmadan TÜM SNI'li ClientHello'ları böl
 }
 
 // NewSplit2Strategy, blacklist ile kurulmuş 2 parçacıklı split stratejisi döner.
 func NewSplit2Strategy(blacklist []string, mode int) *Split2Strategy {
 	return &Split2Strategy{blacklist: blacklist, mode: mode}
 }
+
+// SetForceAll, blacklist eşleşmesini yok sayarak her SNI'li ClientHello'yu
+// bölmeyi açar (GoodbyeDPI -k tarzı global bypass).
+func (s *Split2Strategy) SetForceAll(v bool) { s.force = v }
 
 func (s *Split2Strategy) Metadata() engine.StrategyMeta {
 	return engine.StrategyMeta{
@@ -65,11 +91,22 @@ func (s *Split2Strategy) Apply(raw, addr []byte, send engine.SendFunc) (bool, er
 	}
 
 	sni := ExtractSNI(payload)
-	if sni == "" || !MatchesDomain(sni, s.blacklist) {
+	if sni == "" {
+		return false, nil
+	}
+	if s.force && globalSkipMatch(sni) {
+		fmt.Fprintf(os.Stderr, "[go-engine] global skip (video CDN): %s -> passthrough\n", sni)
+		return false, nil
+	}
+	if !s.force && !MatchesDomain(sni, s.blacklist) {
 		return false, nil
 	}
 
-	fmt.Fprintf(os.Stderr, "[go-engine] SNI eşlendi: %s -> parçalanıyor (mode %d)\n", sni, s.mode)
+	if s.force {
+		fmt.Fprintf(os.Stderr, "[go-engine] SNI bölünüyor (global): %s -> 2 parça (mode %d)\n", sni, s.mode)
+	} else {
+		fmt.Fprintf(os.Stderr, "[go-engine] SNI eşlendi: %s -> parçalanıyor (mode %d)\n", sni, s.mode)
+	}
 	s.sendFragmented(raw, addr, ipHdrLen, tcpHdrLen, payload, send)
 	return true, nil
 }
@@ -77,50 +114,23 @@ func (s *Split2Strategy) Apply(raw, addr []byte, send engine.SendFunc) (bool, er
 // sendFragmented — SNI civarından iki parçaya böl. Orijinal known-good.
 func (s *Split2Strategy) sendFragmented(raw, addr []byte, ipHdrLen, tcpHdrLen int, payload []byte, send engine.SendFunc) {
 	splitAt := chooseSplitPoint(payload)
-	part1 := payload[:splitAt]
-	part2 := payload[splitAt:]
-
 	seqNum := binary.BigEndian.Uint32(raw[ipHdrLen+4 : ipHdrLen+8])
-	frag1 := s.buildFragment(raw, ipHdrLen, tcpHdrLen, part1, seqNum, false)
-	frag2 := s.buildFragment(raw, ipHdrLen, tcpHdrLen, part2, seqNum+uint32(len(part1)), true)
 
-	sendRawStrat(frag1, addr, send)
 	// Kısa gecikme: DPI'ın TCP reassembly penceresini aş, parçaları tek
-	// akışta SNI okumasın.
-	time.Sleep(splitDelay)
-	sendRawStrat(frag2, addr, send)
+	// akışta SNI okumasın. Global modda GoodbyeDPI tarzı: neredeyse sıfır
+	// gecikme (sayfa yüklerinde ~80 paralel TLS akışı 15ms'lik beklerse
+	// ana döngü saniyelerce bloke olur — asıl yavaşlık buydu).
+	delay := splitDelay
+	if s.force {
+		delay = time.Millisecond
+	}
+	sendFragments(raw, addr, ipHdrLen, tcpHdrLen, payload, splitAt, seqNum, delay, send)
 }
 
 // splitDelay, parçalar arası bekleme — DPI'ların çoğu ilk parçayı "eksik
 // TLS" sayar; ikinci parça aralıklı gelince ClientHello'yu tamamlama
 // penceresi dolmuş olur.
 const splitDelay = 15 * time.Millisecond
-
-// buildFragment — psh=true ise yalnızca SON parça PSH+ACK taşır; ara
-// parçalar yalnız ACK ile gider ki alıcı ANAHTARINI doldurmasın.
-func (s *Split2Strategy) buildFragment(original []byte, ipHdrLen, tcpHdrLen int, payload []byte, seqNum uint32, psh bool) []byte {
-	totalLen := ipHdrLen + tcpHdrLen + len(payload)
-	buf := make([]byte, totalLen)
-	copy(buf, original[:ipHdrLen+tcpHdrLen])
-	copy(buf[ipHdrLen+tcpHdrLen:], payload)
-
-	binary.BigEndian.PutUint16(buf[2:4], uint16(totalLen)) // IP Total Length
-	if psh {
-		buf[ipHdrLen+13] = 0x18 // TCP PSH+ACK (son parça)
-	} else {
-		buf[ipHdrLen+13] = 0x10 // TCP ACK yalnız (ara parça)
-	}
-	binary.BigEndian.PutUint32(buf[ipHdrLen+4:ipHdrLen+8], seqNum)
-
-	buf[10], buf[11] = 0, 0
-	binary.BigEndian.PutUint16(buf[10:12], checksum16(buf[:ipHdrLen]))
-
-	buf[ipHdrLen+16], buf[ipHdrLen+17] = 0, 0
-	cs := tcpChecksumWithPseudoHeader(buf[12:16], buf[16:20], buf[ipHdrLen:])
-	binary.BigEndian.PutUint16(buf[ipHdrLen+16:ipHdrLen+18], cs)
-
-	return buf
-}
 
 func sendRawStrat(raw, addr []byte, send engine.SendFunc) {
 	if send == nil {

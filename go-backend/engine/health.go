@@ -50,18 +50,34 @@ func (h *Health) SuccessRate() float64 {
 //   - düşük gecikme -> hafif bonus
 //   - cooldown aktif -> -Inf ta (asla seçilmez)
 //   - çok fazla ardışık başarısızlık -> retry penaltısı
+//
+// Anti-cascade: cezalar düşük kanıtta tam uygulanmaz (evidence < 5 iken
+// ölçeklenir). Aksi halde DPI'ın zehirli penceresinde tek zaman aşımı taze
+// stratejiyi 70'ten 22'ye çökertir ve basamak çöküşü başlar.
 func (h *Health) Score(now time.Time) float64 {
 	if !h.CooldownTill.IsZero() && now.Before(h.CooldownTill) {
 		return math.Inf(-1)
 	}
 	score := h.SuccessRate() * 100
-	score -= math.Min(h.AvgLatencyMs/100, 20)       // gecikme penaltısı (max 20 puan)
-	score -= float64(h.Retries) * 3                  // tekrar deneme penaltısı
-	score -= float64(h.ConsecFails) * 10             // ardışık başarısızlık penaltısı
+	score -= math.Min(h.AvgLatencyMs/100, 20) // gecikme penaltısı (max 20 puan)
+	ev := float64(h.Observed())
+	scale := 1.0
+	if ev < 5 {
+		scale = ev / 5
+	}
+	score -= float64(h.Retries) * 3 * scale     // tekrar deneme penaltısı
+	score -= float64(h.ConsecFails) * 10 * scale // ardışık başarısızlık penaltısı
 	return score
 }
 
+// Observed, bu stratejiyle gözlemlenmiş toplam akış sayısıdır (kanıt).
+func (h *Health) Observed() int {
+	return h.SuccessCount + h.FailCount
+}
+
 // RecordSuccess, başarılı bağlantı ve gecikme ölçümünü işler.
+// Başarı, ardışık başarısızlık zincirini kırar ve cooldown'u kaldırır:
+// strateji çalıştığını kanıtladığı için tekrar denenebilir olmalıdır.
 func (h *Health) RecordSuccess(latencyMs float64) {
 	h.SuccessCount++
 	h.LastLatency = latencyMs
@@ -69,6 +85,7 @@ func (h *Health) RecordSuccess(latencyMs float64) {
 	h.LastResult = "success"
 	h.Retries = 0
 	h.ConsecFails = 0
+	h.CooldownTill = time.Time{}
 
 	if h.AvgLatencyMs == 0 {
 		h.AvgLatencyMs = latencyMs

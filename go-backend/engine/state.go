@@ -118,11 +118,14 @@ func (s *StateStore) ApplyToRegistry(reg *Registry) {
 			he.SuccessCount = h.SuccessCount
 			he.FailCount = h.FailCount
 			he.AvgLatencyMs = h.AvgLatencyMs
-			he.Retries = h.Retries
-			he.ConsecFails = h.ConsecFails
+			// Anti-cascade: önceki oturumun çöküş penaltıları taşınmaz.
+			// ConsecFails/Retries sıfırlanır (kanıt sayıları korunur),
+			// cooldown yeniden başlatılmaz — oturum açılır açılmaz her
+			// strateji kullanılabilir olur, skorlar geçmişi yansıtır.
+			he.Retries = 0
+			he.ConsecFails = 0
 			he.LastUsed = h.LastUsed
 			he.LastResult = h.LastResult
-			he.CooldownTill = h.CooldownTill
 			applied[id] = true
 		}
 	}

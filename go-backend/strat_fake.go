@@ -52,7 +52,8 @@ func buildFakePacket(original []byte, ipHdrLen int, ttl uint8) []byte {
 }
 
 // isPublicIPv4 — 4 baytlık IPv4 adresi halka açık mı? (yerel ağ, loopback,
-// multicast, reserved dışı). Yerel/broadcast hedeflere fake atılmaz.
+// link-local 169.254/16, multicast, reserved dışı). Yerel/broadcast hedeflere
+// fake atılmaz.
 func isPublicIPv4(ip []byte) bool {
 	if len(ip) < 4 {
 		return false
@@ -64,6 +65,10 @@ func isPublicIPv4(ip []byte) bool {
 	case b0 == 172 && ip[1] >= 16 && ip[1] <= 31:
 		return false
 	case b0 == 192 && ip[1] == 168:
+		return false
+	case b0 == 169 && ip[1] == 254: // link-local (APIPA/metadata)
+		return false
+	case b0 == 100 && ip[1] >= 64 && ip[1] <= 127: // CGNAT 100.64.0.0/10
 		return false
 	case b0 >= 224: // multicast + reserved
 		return false

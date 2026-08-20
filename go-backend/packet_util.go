@@ -6,6 +6,9 @@ import (
 	"encoding/binary"
 	"math/rand"
 	"strconv"
+	"time"
+
+	"knots-go-backend/engine"
 )
 
 // chooseSplitPoint, SNI extension'ının BAŞLANGICINDAN ÖNCE sabitlenen bölünme
@@ -29,6 +32,29 @@ func chooseSplitPoint(payload []byte) int {
 		point = length - 16
 	}
 	return point
+}
+
+// sendFragments — ClientHello'yu splitAt noktasından iki parçaya böler ve
+// gönderir: ilk parça ACK-only, son parça PSH+ACK. delay > 0 ise parçalar
+// arasında beklenir (DPI reassembly pencere aşımı); global GoodbyeDPI tarzı
+// modlarda delay=0 verilir (parçalar arka arkaya gider, SNI hiçbir segmentte
+// tam görünmez). Checksum'lar buildTCPFragment içinde yeniden hesaplanır.
+func sendFragments(raw, addr []byte, ipHdrLen, tcpHdrLen int, payload []byte, splitAt int, seqNum uint32, delay time.Duration, send engine.SendFunc) {
+	if splitAt < 16 || splitAt > len(payload)-16 {
+		splitAt = len(payload) / 2
+	}
+	part1 := payload[:splitAt]
+	part2 := payload[splitAt:]
+
+	frag1 := buildTCPFragment(raw, ipHdrLen, tcpHdrLen, part1, seqNum, false)
+	seq2 := seqNum + uint32(len(part1))
+	frag2 := buildTCPFragment(raw, ipHdrLen, tcpHdrLen, part2, seq2, true)
+
+	sendRawStrat(frag1, addr, send)
+	if delay > 0 {
+		time.Sleep(delay)
+	}
+	sendRawStrat(frag2, addr, send)
 }
 
 func checksum16(data []byte) uint16 {
@@ -126,6 +152,94 @@ func windowMinTransform(raw []byte) []byte {
 	binary.BigEndian.PutUint16(buf[ihl+16:ihl+18], cs)
 
 	_ = thl
+	return buf
+}
+
+// mssClampTransform — SYN/SYN-ACK'in TCP MSS seçeneğini 512'ye sabitler.
+// Hedef: Roblox oyun edge'i (128.116.0.0/16) ile kurulan TLS oturumlarının
+// TÜM segmentleri ≤512B olsun; DPI'ın el sıkışma SONRASI akışı kesen
+// büyük-segment/desen kuralı tetiklenmesin. Giden SYN'de sunucunun segment
+// boyutunu, gelen SYN-ACK'te kendi segment boyutumuzu kısar (iki yön de
+// minik parça). MSS seçeneği yoksa / hedef oyun ağı değilse nil döner.
+// İpucu: windowMinTransform sonrası çalışırsa MSS korunur (o, buffer'ın
+// kopyasını alır).
+func mssClampTransform(raw []byte, outbound bool) []byte {
+	if len(raw) < 40 || raw[0]>>4 != 4 || raw[9] != 6 {
+		return nil
+	}
+	ihl := int(raw[0]&0x0F) * 4
+	if ihl < 20 || len(raw) < ihl+24 {
+		return nil
+	}
+	// Uzak (Roblox) taraf: giden→dst, gelen→src; 128.116.0.0/16 mı?
+	off := 16
+	if !outbound {
+		off = 12
+	}
+	if raw[off] != 128 || raw[off+1] != 116 {
+		return nil
+	}
+	if raw[ihl+13]&0x02 == 0 { // SYN yok
+		return nil
+	}
+	thl := int(raw[ihl+12]>>4) * 4
+	if thl < 20 || len(raw) < ihl+thl {
+		return nil
+	}
+	found := false
+	for p := ihl + 20; p < ihl+thl; {
+		kind := raw[p]
+		switch kind {
+		case 0: // EOL
+			p = ihl + thl
+		case 1: // NOP
+			p++
+		default:
+			if p+1 >= ihl+thl || int(raw[p+1]) < 2 {
+				p = ihl + thl
+				continue
+			}
+			ln := int(raw[p+1])
+			if p+ln > ihl+thl {
+				p = ihl + thl
+				continue
+			}
+			if kind == 2 && ln == 4 {
+				found = true
+			}
+			p += ln
+		}
+	}
+	if !found {
+		return nil
+	}
+	buf := make([]byte, len(raw))
+	copy(buf, raw)
+	for p := ihl + 20; p+4 <= ihl+thl; {
+		kind := buf[p]
+		if kind == 0 {
+			break
+		}
+		ln := int(buf[p+1])
+		if kind == 1 {
+			p++
+			continue
+		}
+		if ln < 2 || p+ln > ihl+thl {
+			break
+		}
+		if kind == 2 && ln == 4 {
+			buf[p+2] = 0x02 // MSS = 512 (0x0200)
+			buf[p+3] = 0x00
+			p += ln
+			continue
+		}
+		p += ln
+	}
+	// TCP checksum'ı yeniden hesapla (IP başlığı değişmedi).
+	buf[ihl+16], buf[ihl+17] = 0, 0
+	cs := tcpChecksumWithPseudoHeader(buf[12:16], buf[16:20], buf[ihl:])
+	binary.BigEndian.PutUint16(buf[ihl+16:ihl+18], cs)
 	return buf
 }
 

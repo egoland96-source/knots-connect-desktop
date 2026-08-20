@@ -34,7 +34,7 @@ let appSettingsMemory = {
   dnsLeakProtection: true,
   startWithWindows: false,
   autoUpdate: true,
-  aggressiveMode: false,
+  aggressiveMode: true,
   adblock: true,
 };
 
@@ -160,7 +160,9 @@ function startGoProcess() {
   const methodId = appSettingsMemory.encryptionMethod || 1;
   // Go motoru AdBlock bayrağını Uİ ayarından alır (capalıysa liste/cache'ler yüklenmez)
   const adblockFlag = `--adblock=${appSettingsMemory.adblock ? 'true' : 'false'}`;
-  goProcess = spawn(GO_ENGINE_PATH, [`--method=${methodId}`, adblockFlag, '--fake=true'], {
+  // Aggressive Mode: blacklist işleme, tüm SNI'li ClientHello'lar tek split2 stratejisiyle bölünür
+  const globalFlag = appSettingsMemory.aggressiveMode ? '--global=true' : '--global=false';
+  goProcess = spawn(GO_ENGINE_PATH, [`--method=${methodId}`, adblockFlag, '--fake=true', globalFlag], {
     cwd: BACKEND_DIR,
     env: env,
     windowsHide: true,

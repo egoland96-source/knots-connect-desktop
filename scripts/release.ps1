@@ -2,10 +2,17 @@
 #
 # Kullanım:
 #   powershell -ExecutionPolicy Bypass -File scripts/release.ps1
+#   powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version 1.0.5 -Setup -Notes "aciklama"
+#   $env:GH_TOKEN = "ghp_..." ; powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version 1.0.5
 #
 # Yapar: version bump (sorar) → typecheck+build → zip'ler → git commit+push → GitHub release
 # Gereksinim: gh CLI (girişli veya GH_TOKEN env ile)
-#   $env:GH_TOKEN = "ghp_..." ; powershell -ExecutionPolicy Bypass -File scripts/release.ps1
+param(
+    [string]$Version = '',
+    [switch]$Setup,
+    [string]$Notes = '',
+    [switch]$SkipPrompt
+)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $root
@@ -14,22 +21,30 @@ $pkgPath = Join-Path $root 'package.json'
 $pkg = Get-Content $pkgPath -Raw | ConvertFrom-Json
 $current = $pkg.version
 
-Write-Host "Mevcut versiyon: $current"
-$next = Read-Host "Yeni versiyon (Enter = $([version]$current + 0.0.1))" 
+$next = $Version
 if ([string]::IsNullOrWhiteSpace($next)) {
-    $v = [version]$current
-    $next = "$($v.Major).$($v.Minor).$($v.Build + 1)"
+    Write-Host "Mevcut versiyon: $current"
+    $next = Read-Host "Yeni versiyon (Enter = $([version]$current + 0.0.1))"
+    if ([string]::IsNullOrWhiteSpace($next)) {
+        $v = [version]$current
+        $next = "$($v.Major).$($v.Minor).$($v.Build + 1)"
+    }
 }
 $next = $next.Trim()
 if ($next -notmatch '^\d+\.\d+\.\d+$') { Write-Error "Geçersiz versiyon: $next"; exit 1 }
 
-$withSetup = Read-Host "Tam kurulum Setup.exe de üretilsin mi? (y/N)"
-$wantSetup = $withSetup -match '^[yY]'
+$wantSetup = $Setup
+if (-not $Setup -and -not $SkipPrompt) {
+    $withSetup = Read-Host "Tam kurulum Setup.exe de üretilsin mi? (y/N)"
+    $wantSetup = $withSetup -match '^[yY]'
+}
 
 if (-not $env:GH_TOKEN) {
     $tok = Read-Host "GitHub token girmedin (GH_TOKEN). Token girmek ister misin? (bos = gh girisini kullan)"
     if (-not [string]::IsNullOrWhiteSpace($tok)) { $env:GH_TOKEN = $tok.Trim() }
 }
+
+if ([string]::IsNullOrWhiteSpace($Notes)) { $Notes = "Knots Connect $next" }
 
 Write-Host "`n==> version $current -> $next (setup: $wantSetup)"
 $pkg.version = $next
@@ -80,7 +95,7 @@ if ($wantSetup) {
     $assets += (Join-Path $root "release\Knots-Connect-Setup-$next.exe.blockmap")
     $assets += (Join-Path $root "release\latest.yml")
 }
-gh release create "v$next" @assets --title "Knots Connect $next" --notes "Knots Connect $next"
+gh release create "v$next" @assets --title "Knots Connect $next" --notes $Notes
 if ($LASTEXITCODE -ne 0) { Write-Error "gh release başarısız"; exit 1 }
 
 Write-Host "`nDONE: https://github.com/egoland96-source/knots-connect-desktop/releases/tag/v$next"
