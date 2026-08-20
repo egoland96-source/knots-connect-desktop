@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, net } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, net, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -747,6 +747,10 @@ ipcMain.handle('app:installUpdate', () => {
 
 ipcMain.handle('app:rollbackUpdate', () => {
   updater.rollbackUpdate();
+});
+
+ipcMain.handle('app:openReleases', () => {
+  shell.openExternal('https://github.com/egoland96-source/knots-connect-desktop/releases/latest');
 });
 
 // =========================================================================

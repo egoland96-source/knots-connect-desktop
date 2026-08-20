@@ -6,10 +6,23 @@ const https = require('https');
 
 const OWNER = 'egoland96-source';
 const REPO = 'knots-connect-desktop';
-const GH_LATEST = `https://api.github.com/repos/${OWNER}/${REPO}/releases/latest`;
+// NOTE: we deliberately avoid api.github.com for version detection — it is
+// rate-limited to 60 requests/hour per IP, which shared VPN egress IPs exhaust
+// quickly. The releases/latest redirect carries the tag and has no quota.
+const BASE = `https://github.com/${OWNER}/${REPO}`;
+const RELEASES_LATEST = `${BASE}/releases/latest`;
+const GH_LATEST_API = `https://api.github.com/repos/${OWNER}/${REPO}/releases/latest`;
 
 let downloading = false;
 let stagedDir = null;
+
+function log(msg) {
+  const line = `[${new Date().toISOString()}] [updater] ${msg}`;
+  console.log(line);
+  try {
+    fs.appendFileSync(path.join(app.getPath('userData'), 'updater.log'), line + '\n');
+  } catch (_) { /* ignore */ }
+}
 
 function getJson(url) {
   return new Promise((resolve, reject) => {
@@ -35,6 +48,38 @@ function getJson(url) {
     req.on('error', reject);
     req.setTimeout(30000, () => req.destroy(new Error('timeout')));
   });
+}
+
+// Resolves the latest version by following the /releases/latest redirect,
+// which lands on /releases/tag/vX.Y.Z. No API quota involved.
+function latestViaRedirect() {
+  return new Promise((resolve, reject) => {
+    const req = https.get(
+      RELEASES_LATEST,
+      { headers: { 'User-Agent': 'knots-connect' } },
+      (res) => {
+        res.resume();
+        const loc = res.headers.location || '';
+        const m = loc.match(/\/releases\/tag\/v?([^/?#]+)/);
+        if (res.statusCode >= 300 && res.statusCode < 400 && m) return resolve(m[1]);
+        return reject(new Error(`redirect lookup failed: HTTP ${res.statusCode} ${loc.slice(0, 80)}`));
+      }
+    );
+    req.on('error', reject);
+    req.setTimeout(30000, () => req.destroy(new Error('timeout')));
+  });
+}
+
+async function resolveLatestVersion() {
+  try {
+    const v = await latestViaRedirect();
+    if (v) return v;
+  } catch (e) {
+    log(`redirect lookup failed (${e.message}), falling back to api.github.com`);
+  }
+  const rel = await getJson(GH_LATEST_API);
+  if (!rel.tag_name) throw new Error('no tag_name in api response');
+  return rel.tag_name.replace(/^v/, '');
 }
 
 function downloadFile(url, dest) {
@@ -95,26 +140,42 @@ function versionCompare(a, b) {
 async function checkForUpdates(onStatus) {
   if (!app.isPackaged || downloading) return;
   try {
-    const rel = await getJson(GH_LATEST);
-    if (!rel.tag_name) return;
-    const latest = rel.tag_name.replace(/^v/, '');
+    const latest = await resolveLatestVersion();
+    log(`latest=${latest} current=${app.getVersion()}`);
     if (versionCompare(latest, app.getVersion()) <= 0) return;
-    const asset = rel.assets.find((a) => a.name === `update-${latest}.zip`);
-    if (!asset) return;
+
+    const zipUrl = `${BASE}/releases/download/v${latest}/update-${latest}.zip`;
     onStatus({ status: 'downloading', version: latest });
     downloading = true;
+
     const temp = app.getPath('temp');
     const zipPath = path.join(temp, `knots-update-${latest}.zip`);
-    await downloadFile(asset.browser_download_url, zipPath);
     stagedDir = path.join(temp, `knots-staged-${latest}`);
-    fs.rmSync(stagedDir, { recursive: true, force: true });
-    fs.mkdirSync(stagedDir, { recursive: true });
-    extractZip(zipPath, stagedDir);
-    fs.rmSync(zipPath, { force: true });
+
+    let lastErr = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await downloadFile(zipUrl, zipPath);
+        const size = fs.existsSync(zipPath) ? fs.statSync(zipPath).size : 0;
+        log(`downloaded update-${latest}.zip (${size} bytes), attempt ${attempt}`);
+        fs.rmSync(stagedDir, { recursive: true, force: true });
+        fs.mkdirSync(stagedDir, { recursive: true });
+        extractZip(zipPath, stagedDir);
+        fs.rmSync(zipPath, { force: true });
+        lastErr = null;
+        break;
+      } catch (e) {
+        lastErr = e;
+        log(`attempt ${attempt} failed: ${e.message}`);
+      }
+    }
+    if (lastErr) throw lastErr;
+
     downloading = false;
+    log(`update ${latest} staged successfully`);
     onStatus({ status: 'ready', version: latest });
   } catch (err) {
-    console.error('[updater]', err.message);
+    log(`check failed: ${err.message}`);
     downloading = false;
     stagedDir = null;
     onStatus({ status: 'error', detail: err.message });
@@ -122,12 +183,22 @@ async function checkForUpdates(onStatus) {
 }
 
 function applyUpdate() {
-  if (!stagedDir) return;
+  if (!stagedDir) {
+    log('applyUpdate called but nothing is staged');
+    return;
+  }
   const resourcesDir = appResourcesDir();
   const stagedResources = path.join(stagedDir, 'resources');
-  if (!fs.existsSync(stagedResources)) return;
+  if (!fs.existsSync(stagedResources)) {
+    log(`staged resources missing: ${stagedResources}`);
+    return;
+  }
   const ps1 = path.join(resourcesDir, 'knots-update.ps1');
-  if (!fs.existsSync(ps1)) return;
+  if (!fs.existsSync(ps1)) {
+    log(`update script missing: ${ps1}`);
+    return;
+  }
+  log(`launching installer script for ${stagedDir}`);
   const child = spawn(
     'powershell.exe',
     ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1, '-staged', stagedDir, '-target', resourcesDir, '-exe', process.execPath],
@@ -141,6 +212,7 @@ function rollbackUpdate() {
   const resourcesDir = appResourcesDir();
   const ps1 = path.join(resourcesDir, 'knots-update.ps1');
   if (!fs.existsSync(ps1)) return;
+  log('rollback requested');
   const child = spawn(
     'powershell.exe',
     ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1, '-rollback', '-target', resourcesDir, '-exe', process.execPath],

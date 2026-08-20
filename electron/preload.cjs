@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld('knots', {
   },
   installUpdate: () => ipcRenderer.invoke('app:installUpdate').catch(() => {}),
   rollbackUpdate: () => ipcRenderer.invoke('app:rollbackUpdate').catch(() => {}),
+  openReleases: () => ipcRenderer.invoke('app:openReleases').catch(() => {}),
 });
 
 // 2. Özel TitleBar Pencere Kontrolleri (main.cjs içindeki window:* handler'larına bağlanır)

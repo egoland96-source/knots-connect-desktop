@@ -64,6 +64,7 @@ export interface KnotsBridgeApi {
 
   // === OTOMATİK GÜNCELLEME ===
   onUpdateStatus?: (callback: (info: { status: 'downloading' | 'ready' | 'error'; version: string; detail?: string }) => void) => () => void;
+  openReleases?: () => void;
   installUpdate?: () => Promise<void>;
 }
 

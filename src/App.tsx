@@ -138,6 +138,24 @@ export const App = () => {
                 {updateState.status === 'error' &&
                   `Update check failed${updateState.detail ? `: ${updateState.detail}` : ''} — please try again later.`}
               </span>
+              {updateState.status === 'error' && (
+                <button
+                  onClick={() => window.knots?.openReleases?.()}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: 8,
+                    border: '1px solid rgba(28,200,255,0.4)',
+                    background: 'transparent',
+                    color: 'var(--accent)',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  Open download page
+                </button>
+              )}
               {updateState.status === 'ready' && (
                 <button
                   onClick={() => window.knots?.installUpdate?.()}
