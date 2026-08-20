@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 const readline = require('readline');
-const { autoUpdater } = require('electron-updater');
+const updater = require('./updater.cjs');
 
 let keytar;
 try {
@@ -39,6 +39,24 @@ let appSettingsMemory = {
 };
 
 const SETTINGS_FILE = () => path.join(app.getPath('userData'), 'settings.json');
+
+const SETTING_KEYS = new Set([
+  'autoConnect',
+  'killSwitch',
+  'dnsLeakProtection',
+  'startWithWindows',
+  'autoUpdate',
+  'aggressiveMode',
+  'adblock',
+  'encryptionMethod',
+]);
+
+function normalizeSettingValue(value) {
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value;
+  }
+  return null;
+}
 
 function loadAppSettings() {
   try {
@@ -277,10 +295,34 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
     },
   });
 
   mainWindow.setMenu(null);
+
+  // Güvenlik: pencereyi yalnızca uygulamanın kendi içeriğiyle sınırla.
+  // Renderer herhangi bir nedenle uzak bir sayfaya yönlendirilirse preload
+  // köprüsü (token erişimi dahil) o sayfaya AÇILMAZ.
+  const ALLOWED_NAV = (url) => {
+    if (url.startsWith('file:')) return true;
+    if (app.isPackaged) return false;
+    const dev = new URL('http://localhost:5173');
+    const target = new URL(url);
+    return target.host === dev.host && target.protocol === dev.protocol;
+  };
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (!ALLOWED_NAV(url)) {
+      event.preventDefault();
+    }
+  });
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (!ALLOWED_NAV(url)) return { action: 'deny' };
+    return { action: 'allow' };
+  });
 
   if (process.env.NODE_ENV === 'development' || !app.isPackaged) {
     mainWindow.loadURL('http://localhost:5173');
@@ -298,6 +340,9 @@ function createWindow() {
 // =========================================================================
 
 ipcMain.handle('knots:connect', async (event, serverId) => {
+  if (serverId !== undefined && serverId !== null && typeof serverId !== 'string') {
+    return { success: false, message: 'Geçersiz server_id.' };
+  }
   if (currentEngineMode === 'go') {
     if (!goProcess || goProcess.killed) {
       startGoProcess();
@@ -339,6 +384,9 @@ ipcMain.handle('knots:getStatus', async () => {
 ipcMain.handle('knots:getEngineMode', async () => ({ mode: currentEngineMode }));
 
 ipcMain.handle('knots:setEngineMode', async (event, mode) => {
+  if (mode !== 'python' && mode !== 'go') {
+    return { success: false, message: 'Geçersiz motor modu.' };
+  }
   if (currentEngineMode === mode) {
     return { success: true, mode };
   }
@@ -361,6 +409,9 @@ ipcMain.handle('knots:setEngineMode', async (event, mode) => {
 
 ipcMain.handle('knots:getEncryptionMethod', async () => ({ method_id: appSettingsMemory.encryptionMethod || 1 }));
 ipcMain.handle('knots:setEncryptionMethod', async (event, methodId) => {
+  if (!Number.isInteger(methodId) || methodId < 1) {
+    return { success: false, message: 'Geçersiz şifreleme yöntemi.' };
+  }
   appSettingsMemory.encryptionMethod = methodId;
   // Only send to engine if it's running
   const process = currentEngineMode === 'go' ? goProcess : pythonProcess;
@@ -372,7 +423,14 @@ ipcMain.handle('knots:setEncryptionMethod', async (event, methodId) => {
 
 ipcMain.handle('knots:getSettings', async () => appSettingsMemory);
 ipcMain.handle('knots:updateSetting', async (event, key, value) => {
-  appSettingsMemory[key] = value;
+  if (typeof key !== 'string' || !SETTING_KEYS.has(key)) {
+    return { success: false, message: 'Geçersiz ayar anahtarı.' };
+  }
+  const safeValue = normalizeSettingValue(value);
+  if (safeValue === null) {
+    return { success: false, message: 'Geçersiz ayar değeri.' };
+  }
+  appSettingsMemory[key] = safeValue;
   saveAppSettings();
 
   // startWithWindows: gerçek otomatik başlatma kaydı (Windows)
@@ -485,8 +543,44 @@ function fetchPrivacyList(url) {
   });
 }
 
+function isPrivateHostname(hostname) {
+  const host = (hostname || '').toLowerCase();
+  if (host === 'localhost' || host.endsWith('.localhost')) return true;
+  if (/^[\d.]+$/.test(host) || /^[0-9a-f:]+$/i.test(host)) {
+    return isPrivateIp(host);
+  }
+  return false;
+}
+
+function isPrivateIp(ip) {
+  if (ip.includes(':')) {
+    const v4 = ip.startsWith('::ffff:') ? ip.slice(7) : '';
+    if (v4 && v4.includes('.')) return isPrivateIp(v4);
+    if (ip === '::1') return true;
+    if (/^fc/i.test(ip) || /^fd/i.test(ip) || /^fe[89ab]/i.test(ip)) return true;
+    return false;
+  }
+  const parts = ip.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((p) => Number.isNaN(p) || p < 0 || p > 255)) return false;
+  const [a, b] = parts;
+  if (a === 10) return true;
+  if (a === 127) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  return false;
+}
+
 ipcMain.handle('privacy:fetchList', async (_event, url) => {
   if (typeof url !== 'string' || !/^https:\/\//i.test(url)) {
+    return { ok: false, error: 'invalid-url' };
+  }
+  try {
+    const parsed = new URL(url);
+    if (parsed.username || parsed.password || isPrivateHostname(parsed.hostname)) {
+      return { ok: false, error: 'invalid-url' };
+    }
+  } catch {
     return { ok: false, error: 'invalid-url' };
   }
   return fetchPrivacyList(url);
@@ -539,6 +633,11 @@ ipcMain.handle('privacy:cache:remove', async (_event, name) => {
 
 const SERVICE_NAME = 'knots-vpn';
 const SECURE_STORAGE_FILE = path.join(app.getPath('userData'), '.secure_tokens.json');
+const MAX_TOKEN_BYTES = 8 * 1024;
+
+function isValidToken(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= MAX_TOKEN_BYTES;
+}
 
 function _readSecureStorage() {
   try {
@@ -608,6 +707,7 @@ ipcMain.handle('auth:getToken', async () => {
 });
 
 ipcMain.handle('auth:setToken', async (event, token) => {
+  if (!isValidToken(token)) return { success: false };
   setSecureValue('access_token', token);
   return { success: true };
 });
@@ -622,6 +722,7 @@ ipcMain.handle('auth:getRefreshToken', async () => {
 });
 
 ipcMain.handle('auth:setRefreshToken', async (event, token) => {
+  if (!isValidToken(token)) return { success: false };
   setSecureValue('refresh_token', token);
   return { success: true };
 });
@@ -632,24 +733,18 @@ ipcMain.handle('auth:removeRefreshToken', async () => {
 });
 
 // =========================================================================
-// OTOMATİK GÜNCELLEME (electron-updater + GitHub Releases)
+// OTOMATİK GÜNCELLEME (portable self-update + yedekli değişim)
 // =========================================================================
-autoUpdater.on('update-available', (info) => {
-  console.log(`[updater] Yeni sürüm bulundu: ${info.version} - indiriliyor...`);
-  mainWindow?.webContents.send('knots:updateStatus', { status: 'downloading', version: info.version });
-});
-
-autoUpdater.on('update-downloaded', (info) => {
-  console.log(`[updater] Sürüm ${info.version} indirildi, yeniden başlatınca kurulacak.`);
-  mainWindow?.webContents.send('knots:updateStatus', { status: 'ready', version: info.version });
-});
-
-autoUpdater.on('error', (error) => {
-  console.error('[updater] Güncelleme hatası:', error);
-});
+function sendUpdateStatus(data) {
+  mainWindow?.webContents.send('knots:updateStatus', data);
+}
 
 ipcMain.handle('app:installUpdate', () => {
-  autoUpdater.quitAndInstall();
+  updater.applyUpdate();
+});
+
+ipcMain.handle('app:rollbackUpdate', () => {
+  updater.rollbackUpdate();
 });
 
 // =========================================================================
@@ -661,7 +756,8 @@ app.whenReady().then(() => {
   loadAppSettings();
   createWindow();
   if (app.isPackaged) {
-    autoUpdater.checkForUpdatesAndNotify();
+    updater.checkForUpdates(sendUpdateStatus);
+    setInterval(() => updater.checkForUpdates(sendUpdateStatus), 30 * 60 * 1000);
   }
 });
 

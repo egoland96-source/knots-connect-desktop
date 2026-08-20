@@ -1,6 +1,6 @@
 {
   "name": "knots-connect-desktop",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Knots Connect - Electron + React masaüstü istemcisi",
   "main": "electron/main.cjs",
   "scripts": {
@@ -8,7 +8,8 @@
     "electron:dev": "wait-on http://127.0.0.1:5173 && cross-env ELECTRON_START_URL=http://127.0.0.1:5173 electron .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "vite build",
-    "build:win": "npm run typecheck && npm run build && electron-builder --win --x64"
+    "build:win": "npm run typecheck && npm run build && electron-builder --win --x64",
+    "pack:zip": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pack-zip.ps1"
   },
   "build": {
     "appId": "com.knotsconnect.desktop",
@@ -17,20 +18,24 @@
     "directories": {
       "output": "release"
     },
-    "publish": {
-      "provider": "github",
-      "owner": "egoland96-source",
-      "repo": "knots-connect-desktop"
-    },
     "files": [
       "dist/**/*",
       "electron/**/*",
-      "package.json"
+      "package.json",
+      "!node_modules/**/*",
+      "node_modules/keytar/**/*"
+    ],
+    "asarUnpack": [
+      "node_modules/keytar/**/*"
     ],
     "extraResources": [
       {
         "from": "build/icon.ico",
         "to": "icon.ico"
+      },
+      {
+        "from": "electron/knots-update.ps1",
+        "to": "knots-update.ps1"
       },
       {
         "from": "backend",
@@ -56,22 +61,15 @@
       }
     ],
     "win": {
-      "target": "nsis"
+      "target": [
+        "dir"
+      ],
+      "requestedExecutionLevel": "requireAdministrator"
     },
-    "npmRebuild": false,
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "include": "build/installer.nsh",
-      "unicode": true,
-      "createDesktopShortcut": "always",
-      "createStartMenuShortcut": true,
-      "deleteAppDataOnUninstall": false
-    }
+    "npmRebuild": false
   },
   "dependencies": {
     "axios": "^1.7.2",
-    "electron-updater": "^6.8.9",
     "framer-motion": "^12.43.0",
     "immer": "^11.1.15",
     "keytar": "^7.9.0",

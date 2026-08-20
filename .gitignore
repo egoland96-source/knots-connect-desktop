@@ -10,8 +10,12 @@ npm-debug.log*
 
 # Legacy engine code (unused; kept locally only)
 backend/
-go-backend/
 bin/
+
+# Go engine build artifacts (source lives in go-backend/)
+go-backend/k_main.exe
+go-backend/knots-go-backend.exe
+go-backend/*.exe~
 
 # Engine binaries (build-time artifacts, kept locally)
 backend/k_main.exe
@@ -23,10 +27,11 @@ backend/*.spec
 backend/*.pyc
 backend/__pycache__/
 
-# Scratch probe files
+# Scratch probe files (LIVE tokens — never commit)
 probe*.json
 probe*.txt
 probe_*.json
+NUL.json
 
 # Android build outputs & scratch
 mobile/android/app/build/

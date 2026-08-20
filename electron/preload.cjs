@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld('knots', {
     return () => ipcRenderer.removeListener('knots:updateStatus', listener);
   },
   installUpdate: () => ipcRenderer.invoke('app:installUpdate').catch(() => {}),
+  rollbackUpdate: () => ipcRenderer.invoke('app:rollbackUpdate').catch(() => {}),
 });
 
 // 2. Özel TitleBar Pencere Kontrolleri (main.cjs içindeki window:* handler'larına bağlanır)
