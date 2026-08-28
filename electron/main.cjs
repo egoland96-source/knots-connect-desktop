@@ -260,14 +260,49 @@ function startGoProcess() {
 
 function stopEngineProcess() {
   if (pythonProcess) {
-    pythonProcess.kill();
+    try { pythonProcess.kill(); } catch {}
     pythonProcess = null;
+    try { pythonReadLine?.close(); } catch {}
     pythonReadLine = null;
   }
   if (goProcess) {
-    goProcess.kill();
+    try { goProcess.kill(); } catch {}
     goProcess = null;
+    try { goReadLine?.close(); } catch {}
     goReadLine = null;
+  }
+}
+
+// Windows ENOTEMPTY / dosya kilidi için: güncelleme kurulurken Go/Python
+// motorları ve açık file handle'ları SIGKILL ile tamamen sonlandırılır.
+// Bu fonksiyon mevcut IPC/Go başlatma kodlarını bozmadan sadece quit öncesi çağrılır.
+function terminateEnginesForUpdate() {
+  console.log('[Electron] terminateEnginesForUpdate — SIGKILL');
+  try {
+    if (goProcess) {
+      try { goProcess.kill('SIGKILL'); } catch {}
+      goProcess = null;
+    }
+    if (goReadLine) {
+      try { goReadLine.close(); } catch {}
+      try { goReadLine.removeAllListeners?.(); } catch {}
+      goReadLine = null;
+    }
+    if (pythonProcess) {
+      try { pythonProcess.kill('SIGKILL'); } catch {}
+      pythonProcess = null;
+    }
+    if (pythonReadLine) {
+      try { pythonReadLine.close(); } catch {}
+      try { pythonReadLine.removeAllListeners?.(); } catch {}
+      pythonReadLine = null;
+    }
+    for (const [id, { reject }] of rpcCallbacks) {
+      try { reject(new Error('Update: engine terminated')); } catch {}
+      rpcCallbacks.delete(id);
+    }
+  } catch (e) {
+    console.error('[Electron] terminateEnginesForUpdate failed:', e.message);
   }
 }
 
@@ -1054,6 +1089,8 @@ function sendUpdateStatus(data) {
 }
 
 ipcMain.handle('app:installUpdate', () => {
+  // Windows ENOTEMPTY önlemi: kurulum öncesi Go motorunu SIGKILL ile öldür
+  terminateEnginesForUpdate();
   updater.applyUpdate();
 });
 
@@ -1063,6 +1100,45 @@ ipcMain.handle('app:rollbackUpdate', () => {
 
 ipcMain.handle('app:openReleases', () => {
   shell.openExternal('https://github.com/egoland96-source/knots-connect-desktop/releases/latest');
+});
+
+// --- Güncelleyici entegrasyonu: dev mod + ENOTEMPTY + error handler ---
+// 1) Dev modda güncellemeyi pasif al: sadece paketlenmiş canlı sürümde kontrol
+//    (updater.cjs içinde de app.isPackaged guard var; burada da çift koruma)
+// 2) Windows dosya kilidi: before-quit-for-update'de Go/Python SIGKILL
+// 3) Hata yönetimi: autoUpdater/updater error'ları logla, çökertme
+try {
+  // electron-updater kuruluysa (opsiyonel) — dev modda tetiklenmesin
+  const { autoUpdater } = require('electron-updater');
+  if (autoUpdater) {
+    // Dev modda otomatik indir/kur pasif
+    autoUpdater.autoDownload = false;
+    autoUpdater.autoInstallOnAppQuit = false;
+    autoUpdater.on('error', (err) => {
+      console.error('[autoUpdater] error (handled):', err?.message || err);
+    });
+    autoUpdater.on('before-quit-for-update', () => {
+      console.log('[autoUpdater] before-quit-for-update — terminating engines (SIGKILL)');
+      terminateEnginesForUpdate();
+    });
+  }
+} catch {}
+// Custom updater (updater.cjs) ve Electron app event'i için aynı koruma
+app.on('before-quit-for-update', () => {
+  console.log('[Electron] app before-quit-for-update — terminating engines (SIGKILL)');
+  terminateEnginesForUpdate();
+});
+try {
+  // updater.cjs EventEmitter ise onun error event'ini de yakala
+  if (updater && typeof updater.on === 'function') {
+    updater.on('error', (err) => console.error('[updater] error (handled):', err?.message || err));
+  }
+} catch {}
+process.on('unhandledRejection', (reason) => {
+  const msg = String(reason?.message || reason);
+  if (msg.includes('ENOTEMPTY') || msg.includes('updater') || msg.includes('autoUpdater')) {
+    console.error('[updater] unhandledRejection (handled):', msg);
+  }
 });
 
 // =========================================================================
@@ -1075,9 +1151,12 @@ app.whenReady().then(() => {
   createSplash();
   splashStart = Date.now();
   createWindow();
+  // Dev modunda güncellemeyi pasif al — yalnızca paketlenmiş canlı sürümde kontrol
   if (app.isPackaged) {
     updater.checkForUpdates(sendUpdateStatus);
     setInterval(() => updater.checkForUpdates(sendUpdateStatus), 30 * 60 * 1000);
+  } else {
+    console.log('[updater] dev mode — auto-update check skipped (app.isPackaged=false)');
   }
 });
 

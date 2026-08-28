@@ -3,6 +3,12 @@ const { spawn, spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
+const { EventEmitter } = require('events');
+const updaterEvents = new EventEmitter();
+// Hata yönetimi: updater error'ları uygulamayı çökertmesin, sadece logla ve emit et
+updaterEvents.on('error', (err) => {
+  console.error('[updater] error event (handled):', err?.message || err);
+});
 
 const OWNER = 'egoland96-source';
 const REPO = 'knots-connect-desktop';
@@ -138,7 +144,9 @@ function versionCompare(a, b) {
 }
 
 async function checkForUpdates(onStatus) {
-  if (!app.isPackaged || downloading) return;
+  // Dev modunda güncellemeyi pasif al — yalnızca paketlenmiş canlı sürümde çalışsın
+  if (!app.isPackaged) return;
+  if (downloading) return;
   let versionResolved = false;
   try {
     const latest = await resolveLatestVersion();
@@ -188,6 +196,8 @@ async function checkForUpdates(onStatus) {
     log(`check failed: ${err.message}`);
     downloading = false;
     stagedDir = null;
+    // Hata yönetimi: güncelleme hataları uygulamayı çökertmesin, sadece logla ve emit et
+    try { updaterEvents.emit('error', err); } catch {}
     // Sürüm tespiti başarısızsa (ağ/ DNS kesintisi) kullanıcıyı uyarma —
     // zaten en güncel sürümde olabiliriz ve bu zararsız bir kontroldür.
     // Yalnızca gerçek indirme/ uygulama hatalarında hata durumu bildir.
@@ -235,4 +245,13 @@ function rollbackUpdate() {
   app.quit();
 }
 
-module.exports = { checkForUpdates, applyUpdate, rollbackUpdate };
+module.exports = {
+  checkForUpdates,
+  applyUpdate,
+  rollbackUpdate,
+  // EventEmitter arayüzü — main.cjs `updater.on('error')` ve `before-quit-for-update` için
+  on: updaterEvents.on.bind(updaterEvents),
+  off: updaterEvents.off.bind(updaterEvents),
+  once: updaterEvents.once.bind(updaterEvents),
+  emit: updaterEvents.emit.bind(updaterEvents),
+};
