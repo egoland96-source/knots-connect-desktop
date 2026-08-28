@@ -35,6 +35,7 @@ import { Admin } from './pages/Admin/Admin';
 import { LoginForm } from './components/auth/LoginForm';
 import { VerifyEmailScreen } from './components/auth/VerifyEmailScreen';
 import { ConnectionBorder } from './components/ConnectionBorder/ConnectionBorder';
+import { PerformanceOverlay } from './components/PerformanceOverlay';
 import { useTelemetryInit } from './store/connectionStore';
 import { useConnectionStore } from './store/connectionStore';
 import { usePrivacyStore } from './store/privacyStore';
@@ -230,6 +231,7 @@ const [authState, setAuthState] = useState<'loading' | 'authenticated' | 'unauth
         </motion.div>
       </AnimatePresence>
       <ConnectionBorder />
+      <PerformanceOverlay />
     </div>
   );
 };

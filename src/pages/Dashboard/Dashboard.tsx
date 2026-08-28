@@ -38,6 +38,10 @@ export const Dashboard: React.FC = () => {
   const uploadSpeed = useConnectionStore((s) => s.uploadSpeed);
   const encryptionMethod = useConnectionStore((s) => s.encryptionMethod);
   const uptimeSeconds = useConnectionStore((s) => s.uptimeSeconds);
+  // FAZ 3.A — canlı snapshot (Go IPC)
+  const liveIp = useConnectionStore((s) => s.ipAddress);
+  const liveLocation = useConnectionStore((s) => s.location);
+  const liveIsp = useConnectionStore((s) => s.isp);
 
   const { toggleConnection } = useConnection();
   const activeTechniques = useDpiStore((s) => s.activeTechniques);
@@ -67,31 +71,33 @@ export const Dashboard: React.FC = () => {
     };
   }, []);
 
-  const displayIp = isConnected ? '185.24.10.4' : realGeo?.ip ?? '176.88.147.242';
-  const displayCountry = isConnected ? 'Netherlands' : realGeo?.country ?? 'Türkiye';
-  const displayProvider = isConnected ? 'Knots Secure' : realGeo?.org ?? 'Turkcell Superonline';
+  // FAZ 3.A — bağlıyken canlı IPC snapshot, değilse ipapi
+  const displayIp = isConnected ? (liveIp ?? '185.24.10.4') : realGeo?.ip ?? '176.88.147.242';
+  const displayCountry = isConnected ? (liveLocation?.country ?? 'Netherlands') : realGeo?.country ?? 'Türkiye';
+  const displayProvider = isConnected ? (liveIsp ?? 'Knots Secure') : realGeo?.org ?? 'Turkcell Superonline';
 
   const selectedNode = useMemo(() => MAP_NODES.find((n) => n.id === selectedNodeId) ?? null, [selectedNodeId]);
 
-  // Snapshot for ConnectionOverview
+  // Snapshot for ConnectionOverview — FAZ 3.A canlı IPC ile beslenir
   const snapshot: ConnectionSnapshot = useMemo(() => {
-    // Map status to ConnectionState (store uses 'disconnected'|'connecting'|'connected'|'error' ; spec adds 'disconnecting')
-    const state = (status === 'connecting' ? 'connecting' : status === 'connected' ? 'connected' : status === 'error' ? 'error' : 'disconnected') as ConnectionSnapshot['state'];
+    const state = (status === 'connecting' ? 'connecting' : status === 'connected' ? 'connected' : (status as string) === 'disconnecting' ? 'disconnecting' : status === 'error' ? 'error' : 'disconnected') as ConnectionSnapshot['state'];
+    // Öncelik: seçili node > canlı Go snapshot > varsayılan — kullanıcı seçimi öncelikli
+    const liveServer = liveLocation ? { country: liveLocation.country, city: liveLocation.city ?? '', code: liveLocation.code } : null;
     const server = isConnected
       ? selectedNode
         ? { country: selectedNode.country, city: selectedNode.city ?? '', code: selectedNode.code }
-        : { country: 'Netherlands', city: 'Amsterdam', code: 'NL' }
+        : (liveServer ?? { country: 'Netherlands', city: 'Amsterdam', code: 'NL' })
       : null;
     return {
       state,
       server,
       latencyMs: latencyMs || null,
-      ipAddress: displayIp,
+      ipAddress: liveIp ?? displayIp,
       protectedBytes: (bytesReceived || 0) + (bytesSent || 0),
       uploadBytesPerSecond: uploadSpeed || 0,
       downloadBytesPerSecond: downloadSpeed || 0,
     };
-  }, [status, isConnected, selectedNode, latencyMs, displayIp, bytesReceived, bytesSent, uploadSpeed, downloadSpeed]);
+  }, [status, isConnected, selectedNode, latencyMs, displayIp, liveIp, liveLocation, bytesReceived, bytesSent, uploadSpeed, downloadSpeed]);
 
   const protocolLabel = useMemo(() => {
     const enc = encryptionMethod === 2 ? 'AES-128-GCM' : encryptionMethod === 3 ? 'ChaCha20' : 'AES-256-GCM';

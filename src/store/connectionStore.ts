@@ -32,6 +32,10 @@ interface TelemetryData {
   serverId: string | null;
   engineMode: EngineMode | null;
   encryptionMethod: number;
+  // FAZ 3.A — Snapshot alanları (Go / IPC canlı akış)
+  ipAddress?: string | null;
+  location?: { country: string; city: string; code: string } | null;
+  isp?: string | null;
 }
 
 interface ConnectionStoreState {
@@ -56,6 +60,11 @@ interface ConnectionStoreState {
   cpuUsage: number;
   memoryUsage: number;
   bypassCount: number; // Legacy compatibility
+
+  // Snapshot — FAZ 3.A canlı konum/IP/ISP
+  ipAddress: string | null;
+  location: { country: string; city: string; code: string } | null;
+  isp: string | null;
 
   // Telemetry - history for charts (last 60 samples)
   historyDownload: number[];
@@ -112,6 +121,9 @@ export const useConnectionStore = create<ConnectionStoreState>()((set, get) => (
   cpuUsage: 0,
   memoryUsage: 0,
   bypassCount: 0,
+  ipAddress: null,
+  location: null,
+  isp: null,
 
   // History arrays
   historyDownload: [],
@@ -145,14 +157,18 @@ export const useConnectionStore = create<ConnectionStoreState>()((set, get) => (
   },
 
   disconnect: async () => {
+    // FAZ 3.A — graceful: önce disconnecting, sonra temiz DISCONNECTED
+    set({ status: 'disconnecting' as any });
     try {
       await bridgeService.disconnect();
+    } catch (e) {
+      console.warn('[connectionStore] disconnect RPC failed, forcing disconnected:', (e as Error).message);
     } finally {
-      set({ 
-        status: 'disconnected', 
-        serverId: null, 
-        errorMessage: null, 
-        uptimeSeconds: null, 
+      set({
+        status: 'disconnected',
+        serverId: null,
+        errorMessage: null,
+        uptimeSeconds: null,
         downloadSpeed: 0,
         uploadSpeed: 0,
         bytesReceived: 0,
@@ -165,6 +181,9 @@ export const useConnectionStore = create<ConnectionStoreState>()((set, get) => (
         cpuUsage: 0,
         memoryUsage: 0,
         bypassCount: 0,
+        ipAddress: null,
+        location: null,
+        isp: null,
       });
     }
   },
@@ -259,7 +278,7 @@ export const useConnectionStore = create<ConnectionStoreState>()((set, get) => (
     }
   },
 
-  // Internal telemetry handler - called by IPC bridge
+  // Internal telemetry handler - called by IPC bridge (FAZ 3.A canlı DOWN/UP + snapshot)
   _handleTelemetry: (payload: Partial<TelemetryData>) => {
     set((state) => {
       const now = Date.now();
@@ -284,11 +303,19 @@ export const useConnectionStore = create<ConnectionStoreState>()((set, get) => (
       const newHistoryLatency = [...state.historyLatency, newLatencyMs].slice(-HISTORY_LIMIT);
       const newHistoryTime = [...state.historyTime, now].slice(-HISTORY_LIMIT);
 
+      // FAZ 3.A — Snapshot & status: Go motoru DISCONNECTED/CONNECTING/CONNECTED akışını doğrudan sürer
+      const nextStatus = (payload.status as any) ?? state.status;
+      const isDisconnected = nextStatus === 'disconnected' || nextStatus === 'error';
+      const snapshotIp = (payload as any).ipAddress ?? (payload as any).ip ?? null;
+      const snapshotLocation = (payload as any).location ?? null;
+      const snapshotIsp = (payload as any).isp ?? (payload as any).org ?? null;
+      const protectedBytes = (payload as any).protectedBytes;
+
       return {
         // Current telemetry
         downloadSpeed: newDownloadSpeed,
         uploadSpeed: newUploadSpeed,
-        bytesReceived: newBytesReceived,
+        bytesReceived: protectedBytes != null ? safeNum(protectedBytes) : newBytesReceived,
         bytesSent: newBytesSent,
         packetsReceived: newPacketsReceived,
         packetsSent: newPacketsSent,
@@ -298,7 +325,7 @@ export const useConnectionStore = create<ConnectionStoreState>()((set, get) => (
         cpuUsage: newCpuUsage,
         memoryUsage: newMemoryUsage,
         uptimeSeconds: newUptimeSeconds,
-        bypassCount: newBytesReceived + newBytesSent, // Legacy compatibility
+        bypassCount: (protectedBytes != null ? safeNum(protectedBytes) : newBytesReceived) + newBytesSent,
         
         // History for charts
         historyDownload: newHistoryDownload,
@@ -307,10 +334,14 @@ export const useConnectionStore = create<ConnectionStoreState>()((set, get) => (
         historyTime: newHistoryTime,
         
         // Status updates
-        status: payload.status ?? state.status,
+        status: nextStatus,
         serverId: payload.serverId ?? state.serverId,
         engineMode: payload.engineMode ?? state.engineMode,
         encryptionMethod: payload.encryptionMethod ?? state.encryptionMethod,
+        // Snapshot — disconnected'ta temizle, aksi halde geleni koru
+        ipAddress: isDisconnected ? null : (snapshotIp ?? state.ipAddress),
+        location: isDisconnected ? null : (snapshotLocation ?? state.location),
+        isp: isDisconnected ? null : (snapshotIsp ?? state.isp),
       };
     });
   },

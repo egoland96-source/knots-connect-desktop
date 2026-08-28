@@ -94,6 +94,8 @@ export interface KnotsBridgeApi {
   onUpdateStatus?: (callback: (info: { status: 'downloading' | 'ready' | 'error'; version: string; detail?: string }) => void) => () => void;
   openReleases?: () => void;
   installUpdate?: () => Promise<void>;
+  toggleDevTools?: () => Promise<void>;
+  openLogs?: () => Promise<void>;
 }
 
 export interface WindowControlsApi {

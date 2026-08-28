@@ -8,9 +8,11 @@ import type { ConnectResult, DisconnectResult, EngineMode, EngineStatus } from '
  * fonksiyonları üzerinden main process'e gider.
  */
 export const bridgeService = {
-  /** Motoru tetikleyip bağlantıyı başlatır. */
-  connect: async (serverId?: string): Promise<ConnectResult> => {
-    return window.knots.connect(serverId);
+  /** Motoru tetikleyip bağlantıyı başlatır. — config obje veya serverId string kabul eder (FAZ 3.A). */
+  connect: async (config?: string | { serverId?: string; protocol?: string; city?: string; country?: string }): Promise<ConnectResult> => {
+    const serverId = typeof config === 'string' ? config : config?.serverId;
+    // config objesi iletilirse Go tarafı gelecekte protokol/şehir bazlı rota seçebilir
+    return window.knots.connect(serverId as any);
   },
 
   /** Aktif bağlantıyı sonlandırır. */
