@@ -52,15 +52,15 @@ let telemetryState = {
   bytesReceived: 0,
   bytesSent: 0,
   latencyMs: 24,
-  ipAddress: null as string | null,
-  location: null as { country: string; city: string; code: string } | null,
-  isp: null as string | null,
-  serverId: null as string | null,
+  ipAddress: null,
+  location: null,
+  isp: null,
+  serverId: null,
   uptimeSeconds: 0,
 };
-let telemetryUptimeTimer: NodeJS.Timeout | null = null;
+let telemetryUptimeTimer = null;
 
-const SERVER_MAP: Record<string, { country: string; city: string; code: string; lat: number; lon: number }> = {
+var SERVER_MAP = {
   nl: { country: 'Netherlands', city: 'Amsterdam', code: 'NL', lat: 52.37, lon: 4.9 },
   de: { country: 'Germany', city: 'Frankfurt', code: 'DE', lat: 50.11, lon: 8.68 },
   us: { country: 'United States', city: 'New York', code: 'US', lat: 40.71, lon: -74 },
@@ -71,13 +71,13 @@ const SERVER_MAP: Record<string, { country: string; city: string; code: string; 
   ch: { country: 'Switzerland', city: 'Zurich', code: 'CH', lat: 47.37, lon: 8.54 },
 };
 
-function emitTelemetry(payload: any) {
+function emitTelemetry(payload) {
   try {
     mainWindow?.webContents.send('knots:telemetry', payload);
   } catch {}
 }
 
-function fetchLiveGeo(): Promise<{ ip: string; country: string; city: string; code: string; org: string } | null> {
+function fetchLiveGeo() {
   return new Promise((resolve) => {
     try {
       const req = net.request('https://ipapi.co/json/');
@@ -93,15 +93,15 @@ function fetchLiveGeo(): Promise<{ ip: string; country: string; city: string; co
         });
       });
       req.on('error', () => resolve(null));
-      req.setTimeout(4000, () => { try { (req as any).abort(); } catch {} resolve(null); });
+      req.setTimeout(4000, () => { try { req.abort(); } catch {} resolve(null); });
       req.end();
     } catch { resolve(null); }
   });
 }
 
-function startTelemetryLoop(serverId: string | null) {
+function startTelemetryLoop(serverId) {
   stopTelemetryLoop();
-  telemetryState.serverId = serverId;
+  telemetryState.serverId = serverId || null;
   telemetryState.bytesReceived = 0;
   telemetryState.bytesSent = 0;
   telemetryState.uptimeSeconds = 0;
@@ -112,7 +112,7 @@ function startTelemetryLoop(serverId: string | null) {
   // Uptime counter
   telemetryUptimeTimer = setInterval(() => {
     telemetryState.uptimeSeconds += 1;
-  }, 1000) as any;
+  }, 1000);
 
   telemetryInterval = setInterval(() => {
     // Simulate live DOWN/UP — Go packet counters would drive this in production
@@ -137,7 +137,7 @@ function startTelemetryLoop(serverId: string | null) {
       isp: telemetryState.isp,
       protectedBytes: telemetryState.bytesReceived + telemetryState.bytesSent,
     });
-  }, 1000) as any;
+  }, 1000);
 }
 
 function stopTelemetryLoop() {
@@ -591,9 +591,9 @@ function createWindow() {
 
 ipcMain.handle('knots:connect', async (event, serverId) => {
   // serverId string veya { serverId, country, city } config objesi olabilir
-  let sid: string | null = null;
+  let sid = null;
   if (typeof serverId === 'string') sid = serverId;
-  else if (serverId && typeof serverId === 'object' && (serverId as any).serverId) sid = String((serverId as any).serverId);
+  else if (serverId && typeof serverId === 'object' && serverId.serverId) sid = String(serverId.serverId);
   else if (serverId !== undefined && serverId !== null && typeof serverId !== 'string') {
     return { success: false, message: 'Geçersiz server_id.' };
   }
@@ -663,7 +663,7 @@ ipcMain.handle('knots:connect', async (event, serverId) => {
       emitTelemetry({ status: 'connected', serverId: sid, engineMode: currentEngineMode, ipAddress: telemetryState.ipAddress, location: loc, isp: 'Knots Secure', latencyMs: 28 });
     }
     return res;
-  } catch (e: any) {
+  } catch (e) {
     emitTelemetry({ status: 'error', serverId: sid, error: e.message });
     throw e;
   }
