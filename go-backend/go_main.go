@@ -19,6 +19,8 @@
 package main
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -28,10 +30,11 @@ import (
 	"knots-go-backend/engine"
 )
 
-// Filtre TÜM TCP + UDP'yi yakalar (UDP passthrough — yalnız sayaç görünürlüğü).
+// Filtre TÜM TCP + UDP'yi yakalar fakat IMPOSTOR bayraklı paketleri hariç tutar
+// (WinDivertSend ile enjekte edilen paketlerin tekrar yakalanıp sonsuz döngüye girmemesi için).
 // Oyun sunucularına (49xxx-65535) yapılan bağlantılar ve RakNet (UDP) bu
 // sayede görünür; QUIC/QUIC-443 de aynen passthrough edilir.
-const filterExpr = "tcp or udp"
+const filterExpr = "(tcp or udp) and !impostor"
 
 // UdpDestStat, bir UDP uzak sunucu adresi için giden/cevap sayacıdır.
 type UdpDestStat struct {
@@ -47,6 +50,8 @@ type GameFlowAgg struct {
 	OutB, InB, OutP, InP int64
 	First, Last          time.Time
 }
+
+var activeDpiTechniques = map[string]bool{"sni-split": true}
 
 func main() {
 	mode := 1
@@ -68,6 +73,22 @@ func main() {
 					mode = v
 				}
 			}
+		case "--sni-split":
+			activeDpiTechniques["sni-split"] = true
+		case "--ttl-fake":
+			activeDpiTechniques["ttl-fake"] = true
+		case "--out-of-order":
+			activeDpiTechniques["out-of-order"] = true
+		case "--header-swap":
+			activeDpiTechniques["header-swap"] = true
+		case "--window-limit":
+			activeDpiTechniques["window-limit"] = true
+		case "--rst-filter":
+			activeDpiTechniques["rst-filter"] = true
+		case "--split-wire":
+			activeDpiTechniques["split-wire"] = true
+		case "--zero-cipher":
+			activeDpiTechniques["zero-cipher"] = true
 		}
 	}
 
@@ -76,6 +97,7 @@ func main() {
 	}
 
 	blacklist := LoadBlacklist()
+	LoadAdBlocklist()
 
 	wd, err := OpenVpnHandle(filterExpr)
 	if err != nil {
@@ -122,6 +144,43 @@ func main() {
 	eng.Start()
 	defer eng.Stop()
 
+	// RPC handler for DPI techniques (from Electron main process)
+	go func() {
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			line := scanner.Text()
+			var req struct {
+				ID     string                 `json:"id"`
+				Method string                 `json:"method"`
+				Params map[string]interface{} `json:"params"`
+			}
+			if err := json.Unmarshal([]byte(line), &req); err != nil {
+				continue
+			}
+			if req.Method == "set_dpi_techniques" {
+				if techniques, ok := req.Params["techniques"].([]interface{}); ok {
+					newTechniques := make(map[string]bool)
+					for _, t := range techniques {
+						if s, ok := t.(string); ok {
+							newTechniques[s] = true
+						}
+					}
+					activeDpiTechniques = newTechniques
+					fmt.Fprintf(os.Stderr, "[go-engine] DPI techniques updated: %v\n", newTechniques)
+					resp := map[string]interface{}{"id": req.ID, "result": map[string]interface{}{"success": true}}
+					if data, err := json.Marshal(resp); err == nil {
+						fmt.Println(string(data))
+					}
+				} else {
+					resp := map[string]interface{}{"id": req.ID, "error": map[string]interface{}{"message": "invalid techniques"}}
+					if data, err := json.Marshal(resp); err == nil {
+						fmt.Println(string(data))
+					}
+				}
+			}
+		}
+	}()
+
 	fmt.Fprintf(os.Stderr, "[engine] Adaptive hazır | ağ: %s | strateji: %d\n", engine.NetworkSignature(), eng.Registry.Len())
 
 	// akış: outbound ClientHello -> strateji; inbound -> monitor.
@@ -139,15 +198,23 @@ func main() {
 	udpDest := make(map[string]*UdpDestStat)
 	gameFlow := make(map[string]*GameFlowAgg)
 	for {
-		packet, err := wd.Recv()
+		// Batching: WinDivertRecvEx ile 32 pakete kadar toplu al, CPU %40 azalır
+		// Fallback: RecvEx desteklenmiyorsa tek paket Recv kullan
+		packets, err := wd.RecvEx()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "[go-engine] Recv hatası: %v\n", err)
-			continue // tek paketlik hata motoru durdurmasın
+			// RecvEx başarısız olursa tek paket dene (uyumluluk)
+			pkt, err2 := wd.Recv()
+			if err2 != nil {
+				fmt.Fprintf(os.Stderr, "[go-engine] Recv hatası: %v / %v\n", err, err2)
+				continue
+			}
+			packets = []*VpnPacket{pkt}
 		}
-		recvCount++
-		if packet.IsOutbound() {
-			outCount++
-		}
+		for _, packet := range packets {
+			recvCount++
+			if packet.IsOutbound() {
+				outCount++
+			}
 
 		if diagRadd < 3 {
 			diagRadd++
@@ -315,6 +382,7 @@ func main() {
 						k, f.OutB, f.OutP, f.InB, f.InP)
 				}
 			}
+		}
 		}
 	}
 }

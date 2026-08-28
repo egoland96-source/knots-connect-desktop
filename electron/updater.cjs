@@ -139,8 +139,10 @@ function versionCompare(a, b) {
 
 async function checkForUpdates(onStatus) {
   if (!app.isPackaged || downloading) return;
+  let versionResolved = false;
   try {
     const latest = await resolveLatestVersion();
+    versionResolved = true;
     log(`latest=${latest} current=${app.getVersion()}`);
     if (versionCompare(latest, app.getVersion()) <= 0) return;
 
@@ -150,18 +152,26 @@ async function checkForUpdates(onStatus) {
 
     const temp = app.getPath('temp');
     const zipPath = path.join(temp, `knots-update-${latest}.zip`);
-    stagedDir = path.join(temp, `knots-staged-${latest}`);
 
     let lastErr = null;
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      // Her denemede BENZERSİZ bir geçici dizin kullan. Böylece önceki
+      // denemenin bıraktığı (antivirüs/kilitli dosya nedeniyle silinemeyen)
+      // dizine hiç dokunmayız ve ENOTEMPTY hatası oluşmaz.
+      const attemptDir = path.join(temp, `knots-staged-${latest}-${Date.now()}-${attempt}`);
       try {
         await downloadFile(zipUrl, zipPath);
         const size = fs.existsSync(zipPath) ? fs.statSync(zipPath).size : 0;
         log(`downloaded update-${latest}.zip (${size} bytes), attempt ${attempt}`);
-        fs.rmSync(stagedDir, { recursive: true, force: true });
-        fs.mkdirSync(stagedDir, { recursive: true });
-        extractZip(zipPath, stagedDir);
+        try {
+          fs.rmSync(attemptDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 250 });
+        } catch (rmErr) {
+          log(`staged dir temizlenemedi (yok sayılıyor): ${rmErr.message}`);
+        }
+        fs.mkdirSync(attemptDir, { recursive: true });
+        extractZip(zipPath, attemptDir);
         fs.rmSync(zipPath, { force: true });
+        stagedDir = attemptDir;
         lastErr = null;
         break;
       } catch (e) {
@@ -178,7 +188,10 @@ async function checkForUpdates(onStatus) {
     log(`check failed: ${err.message}`);
     downloading = false;
     stagedDir = null;
-    onStatus({ status: 'error', detail: err.message });
+    // Sürüm tespiti başarısızsa (ağ/ DNS kesintisi) kullanıcıyı uyarma —
+    // zaten en güncel sürümde olabiliriz ve bu zararsız bir kontroldür.
+    // Yalnızca gerçek indirme/ uygulama hatalarında hata durumu bildir.
+    if (versionResolved) onStatus({ status: 'error', detail: err.message });
   }
 }
 

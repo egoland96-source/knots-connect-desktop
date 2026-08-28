@@ -86,7 +86,7 @@ export const Servers: React.FC = () => {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(280px, 0.5fr)', gap: 'var(--space-4)', alignItems: 'start' }}>
+      <div className="servers-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(280px, 0.5fr)', gap: 'var(--space-4)', alignItems: 'start' }}>
         {/* SOL: Arama + Listeleme */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
           {/* Arama kutusu - Ctrl+K support */}
@@ -243,8 +243,8 @@ export const Servers: React.FC = () => {
           <Card>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 'var(--space-3)' }}>Overview</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-              <OverviewRow icon={Globe} label="Total Servers" value={`${SERVERS.length}`} />
-              <OverviewRow icon={Globe} label="Countries" value="6" />
+              <OverviewRow icon={Globe} label="Total Servers" value={`${filtered.length || SERVERS.length}`} />
+              <OverviewRow icon={Globe} label="Countries" value={`${new Set((filtered.length ? filtered : SERVERS).map((s) => s.country)).size || new Set(SERVERS.map((s) => s.country)).size}`} />
               <OverviewRow icon={Signal} label="Average Ping" value={`${avgPing} ms`} />
               <OverviewRow icon={Star} label="Favorites" value={`${Object.values(favorites).filter(Boolean).length}`} />
             </div>

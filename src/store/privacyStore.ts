@@ -253,7 +253,8 @@ export const usePrivacyStore = create<PrivacyStoreState>()((set, get) => {
     syncServerLists: async () => {
       try {
         const token = await window.knotsAuth?.getToken();
-        if (!token || token.startsWith('guest_')) return;
+        // Zero-knowledge Knots IDs (knots_*) ve guest hesaplar backend'e gitmez — lokal liste yeterli
+        if (!token || token.startsWith('guest_') || token.startsWith('knots_')) return;
         const res = await fetch(`${API_BASE}/api/v1/lists`, {
           headers: { Authorization: `Bearer ${token}` },
         });

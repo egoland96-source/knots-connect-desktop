@@ -10,6 +10,10 @@ export interface User {
   subscriptionExpire: string | null;
   isAdmin: boolean;
   subscription?: Subscription;
+  /** Zero-knowledge anonymous identity */
+  knotsId?: string;
+  knotsIdFormatted?: string;
+  mnemonic?: string;
 }
 
 export interface Subscription {
@@ -24,12 +28,32 @@ export interface Subscription {
 export interface LoginRequest {
   email: string;
   password: string;
+  hwid?: string;
 }
 
 export interface RegisterRequest {
   username: string;
   email: string;
   password: string;
+  hwid?: string;
+}
+
+export interface KnotsAuthRequest {
+  knotsId: string;
+  hwid?: string;
+}
+
+export interface KnotsInitResponse {
+  success: boolean;
+  knotsId: string;
+  knotsIdRaw: string;
+  knotsIdFormatted?: string;
+  mnemonic: string;
+  message?: string;
+}
+
+export interface KnotsRecoverRequest {
+  mnemonic: string;
 }
 
 export interface AuthResponse {

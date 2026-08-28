@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useConnectionStore } from '../../store/connectionStore';
 import { usePrivacyStore } from '../../store/privacyStore';
+import { useDnsStore } from '../../store/dnsStore';
 import { Section, ToggleItem } from '../../components/ui';
 import { PrivacyProtectionPanel, FilterListsPanel, CustomRulesPanel, LiveProtectionFeed } from '../../components/privacy';
 
@@ -28,8 +29,13 @@ export const Settings: React.FC = () => {
   const toggleSetting = useConnectionStore((s) => s.toggleSetting);
 
   const setPrivacyEnabled = usePrivacyStore((s) => s.setEnabled);
+  const dnsMode = useDnsStore((s) => s.mode);
+  const setDnsMode = useDnsStore((s) => s.setMode);
+  const loadDns = useDnsStore((s) => s.load);
 
   const [encOpen, setEncOpen] = useState(false);
+
+  React.useEffect(()=>{ loadDns(); }, [loadDns]);
 
   const isConnected = status === 'connected' || status === 'connecting';
 
@@ -193,6 +199,23 @@ export const Settings: React.FC = () => {
 
         {/* PRIVACY */}
         <Section title="Privacy" icon={<Eye size={16} strokeWidth={2} />}>
+          <SettingRow
+            icon={<Network size={17} strokeWidth={1.8} />}
+            title="DNS Modu"
+            desc={dnsMode==='cloudflare' ? 'Cloudflare Security Shield (malware kalkanı) — kart yok' : 'Yerel DNS (sistem) — ISP varsayılanı'}
+            control={
+              <div style={{display:'flex',gap:6,background:'var(--glass-bg-light)',padding:4,borderRadius:12,border:'1px solid var(--glass-border)'}}>
+                {(['local','cloudflare'] as const).map(m=>(
+                  <button key={m} onClick={()=>setDnsMode(m)} className={`knots-glass-btn ${dnsMode===m?'is-active':''}`} style={{padding:'8px 14px',borderRadius:10,fontSize:12.5,fontWeight:600,cursor:'pointer'}}>
+                    {m==='local'?'Yerel':'Cloudflare'}
+                  </button>
+                ))}
+              </div>
+            }
+          />
+          <div style={{fontSize:12,color:'var(--text-muted)',marginTop:-8,marginBottom:8,lineHeight:1.5}}>
+            Yerel: sistem DNS'i • Cloudflare: <code>https://security.cloudflare-dns.com/dns-query</code> (filtreli, DoH, uygulama-içi) — UDP 53 kesilmez, sadece Knots sorguları gider. Değişim anında, yeniden başlatma yok.
+          </div>
           <ToggleItem
             icon={Eye}
             title="DNS Leak Protection"

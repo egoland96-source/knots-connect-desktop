@@ -78,6 +78,13 @@ export const bridgeService = {
     }
   },
 
+  /** Aktif DPI tekniklerini backend'e iletir. */
+  setDpiTechniques: async (techniques: string[]): Promise<any> => {
+    if (window.knots && typeof window.knots.setDpiTechniques === 'function') {
+      return window.knots.setDpiTechniques(techniques);
+    }
+  },
+
   // =========================================================================
   // YENİ: ÇOKLU ŞİFRELEME YÖNTEMİ IPC ENTEGRASYONLARI
   // =========================================================================

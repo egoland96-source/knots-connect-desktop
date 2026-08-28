@@ -67,6 +67,53 @@ function decodeJWT(token: string): { exp: number } | null {
   }
 }
 
+// ── Knots ID helpers (brifing: XXXX-XXXX-XXXX-XXXX + 12-word mnemonic) ─────
+function formatKnotsIdLocal(digits: string): string {
+  const d = digits.replace(/\D/g, '').slice(0, 16);
+  return d.replace(/(.{4})/g, '$1-').replace(/-$/, '');
+}
+function normalizeKnotsIdLocal(raw: string): string | null {
+  const d = raw.replace(/\D/g, '').slice(0, 16);
+  return d.length === 16 ? d : null;
+}
+function generateKnotsIdFallback(): string {
+  let s = '';
+  const arr = typeof crypto !== 'undefined' && (crypto as any).getRandomValues ? new Uint32Array(16) : null;
+  if (arr) {
+    (crypto as any).getRandomValues(arr);
+    for (let i = 0; i < 16; i++) s += (arr[i] % 10).toString();
+  } else {
+    for (let i = 0; i < 16; i++) s += Math.floor(Math.random() * 10).toString();
+  }
+  if (/^0+$/.test(s)) s = '1' + s.slice(1);
+  return s;
+}
+const KNOTS_FALLBACK_WORDS = 'abandon ability able about above absent absorb abstract absurd abuse access accident account accuse achieve acid acoustic acquire across act action actor actress actual adapt add addict address adjust admit adult advance advice aeroplane affair afford afraid again age agent agree ahead aim air airport aisle alarm album alcohol alert alien all alley allow almost alone alpha already also alter always amateur amazing among amount amused analyst anchor ancient anger angle angry animal ankle announce annual another answer antenna antique anxiety any apart apology appear apple approve april arch arctic area arena argue arm armed armor army around arrange arrest arrive arrow art artefact artist artwork ask aspect assault asset assist assume asthma athlete atom attack attend attitude attract auction audit august aunt author auto autumn average avocado avoid awake aware away awesome awful awkward axis baby bachelor bacon badge bag balance balcony ball bamboo banana banner bar barely bargain'.split(' ');
+function generateMnemonicFallback(): string {
+  const out: string[] = [];
+  for (let i = 0; i < 12; i++) {
+    const idx = Math.floor(Math.random() * KNOTS_FALLBACK_WORDS.length);
+    out.push(KNOTS_FALLBACK_WORDS[idx]);
+  }
+  return out.join(' ');
+}
+function knotsUserFromIdentity(knotsIdRaw: string, mnemonic: string): User {
+  const formatted = formatKnotsIdLocal(knotsIdRaw);
+  return {
+    id: knotsIdRaw,
+    username: `Knots-${knotsIdRaw.slice(-4)}`,
+    email: `${knotsIdRaw}@knots.local`,
+    createdAt: new Date().toISOString(),
+    emailVerified: true,
+    subscriptionType: 'free',
+    subscriptionExpire: null,
+    isAdmin: false,
+    knotsId: knotsIdRaw,
+    knotsIdFormatted: formatted,
+    mnemonic,
+  };
+}
+
 interface AuthStoreState {
   user: User | null;
   accessToken: string | null;
@@ -90,6 +137,11 @@ interface AuthActions {
   changeSubscription: (plan: SubscriptionPlan) => Promise<void>;
   clearError: () => void;
   setLoading: (loading: boolean) => void;
+  // Zero-knowledge Knots ID (brifing: XXXX-XXXX-XXXX-XXXX + 12-word mnemonic)
+  knotsAuth: (knotsId: string) => Promise<void>;
+  knotsCreateIdentity: () => Promise<{ knotsId: string; mnemonic: string }>;
+  knotsRecover: (mnemonic: string) => Promise<void>;
+  getKnotsIdentity: () => Promise<{ knotsId: string; mnemonic: string } | null>;
 }
 
 interface AuthAPI {
@@ -181,7 +233,8 @@ class AuthHTTPClient implements AuthAPI {
     this.client.interceptors.request.use(
       async (config) => {
         const token = await secureStorage.getToken();
-        if (token) {
+        // knots_ / guest_ are local zero-knowledge IDs — never send to backend
+        if (token && !token.startsWith('knots_') && !token.startsWith('guest_')) {
           config.headers.Authorization = `Bearer ${token}`;
         }
         return config;
@@ -201,6 +254,10 @@ class AuthHTTPClient implements AuthAPI {
             const refreshToken = await secureStorage.getRefreshToken();
             if (!refreshToken) {
               throw new Error('No refresh token available');
+            }
+            // knots_ / guest_ local tokens cannot be refreshed via backend
+            if (refreshToken.startsWith('knots_') || refreshToken.startsWith('guest_')) {
+              throw new Error('Local token — no refresh');
             }
 
             const response = await axios.post<ApiEnvelope>(
@@ -222,7 +279,12 @@ class AuthHTTPClient implements AuthAPI {
             console.error('Token refresh failed:', refreshError);
             await secureStorage.removeToken();
             await secureStorage.removeRefreshToken();
-            window.location.href = '/login';
+            useAuthStore.setState({
+              user: null,
+              accessToken: null,
+              refreshToken: null,
+              isAuthenticated: false,
+            });
           }
         }
 
@@ -357,9 +419,15 @@ class AuthHTTPClient implements AuthAPI {
     }
   }
 
-  async logout(): Promise<void> {
+  async logout(refreshToken?: string): Promise<void> {
     try {
-      await this.client.post<void>('/api/v1/auth/logout');
+      // Sunucu tarafındaki oturumu da sonlandır: refresh token'ı her iki key
+      // biçiminde gönderilir; sunucu hangisini bekliyorsa onu kullanır,
+      // gövdeyi yok sayan sunucular için etkisizdir.
+      const body = refreshToken
+        ? { refresh_token: refreshToken, refreshToken }
+        : undefined;
+      await this.client.post<void>('/api/v1/auth/logout', body);
     } catch (error) {
       console.error('Logout request failed:', error);
       throw error;
@@ -476,7 +544,8 @@ export const useAuthStore = create<AuthStoreState & AuthActions>()(
       });
 
       try {
-        await authHTTPClient.logout();
+        const refreshToken = await secureStorage.getRefreshToken();
+        await authHTTPClient.logout(refreshToken || undefined);
       } catch (error) {
         console.error('Logout API call failed:', error);
       } finally {
@@ -534,6 +603,14 @@ export const useAuthStore = create<AuthStoreState & AuthActions>()(
     },
 
     loadProfile: async () => {
+      // Knots_ ve guest_ zero-knowledge yerel kimliklerdir — backend /auth/me çağrılmaz
+      try {
+        const tok = await secureStorage.getToken().catch(() => null);
+        if (tok && (tok.startsWith('knots_') || tok.startsWith('guest_'))) {
+          set((state) => { state.loading = false; });
+          return;
+        }
+      } catch {}
       set((state) => {
         state.loading = true;
         state.error = null;
@@ -573,6 +650,32 @@ export const useAuthStore = create<AuthStoreState & AuthActions>()(
             state.initialized = true;
           });
           return;
+        }
+        if (storedToken.startsWith('knots_')) {
+          const raw = storedToken.slice(6).split('_')[0].replace(/\D/g, '').slice(0, 16);
+          if (raw.length === 16) {
+            let mnemonic = '';
+            try {
+              if (typeof localStorage !== 'undefined') mnemonic = localStorage.getItem('knots:mnemonic:' + raw) || '';
+            } catch {}
+            if (!mnemonic) {
+              try {
+                const bridge: any = (typeof window !== 'undefined' ? (window as any).knots : null);
+                const d: any = bridge?.getIdentity ? await bridge.getIdentity().catch(() => null) : null;
+                if (d?.mnemonic) mnemonic = d.mnemonic;
+              } catch {}
+            }
+            if (!mnemonic) mnemonic = generateMnemonicFallback();
+            const user = knotsUserFromIdentity(raw, mnemonic);
+            set((state) => {
+              state.user = user;
+              state.accessToken = storedToken;
+              state.refreshToken = storedToken;
+              state.isAuthenticated = true;
+              state.initialized = true;
+            });
+            return;
+          }
         }
 
         if (!tokenPayload) {
@@ -688,6 +791,17 @@ export const useAuthStore = create<AuthStoreState & AuthActions>()(
     },
 
     changeSubscription: async (plan: SubscriptionPlan) => {
+      // Local-only for knots_/guest_ — no backend
+      try {
+        const tok = await secureStorage.getToken().catch(() => null);
+        if (tok && (tok.startsWith('knots_') || tok.startsWith('guest_'))) {
+          set((state) => {
+            if (state.user) state.user.subscriptionType = plan;
+            state.loading = false;
+          });
+          return;
+        }
+      } catch {}
       set((state) => {
         state.loading = true;
         state.error = null;
@@ -740,6 +854,185 @@ export const useAuthStore = create<AuthStoreState & AuthActions>()(
       }
     },
 
+    knotsAuth: async (knotsId: string) => {
+      set((state) => {
+        state.loading = true;
+        state.error = null;
+      });
+      try {
+        const normalized = normalizeKnotsIdLocal(knotsId);
+        if (!normalized) throw new Error('Knots ID 16 haneli olmalı');
+        let mnemonic = '';
+        const bridge: any = (typeof window !== 'undefined' ? (window as any).knots : null);
+        if (bridge?.auth) {
+          const res = await bridge.auth(normalized);
+          if (res && res.success === false) throw new Error(res.message || 'Auth failed');
+          if (res?.mnemonic) mnemonic = res.mnemonic;
+        }
+        if (!mnemonic && bridge?.getIdentity) {
+          try {
+            const d: any = await bridge.getIdentity();
+            if (d?.mnemonic && (d.knotsIdRaw === normalized || d.knotsId?.replace(/\D/g, '') === normalized)) mnemonic = d.mnemonic;
+          } catch {}
+        }
+        if (!mnemonic) {
+          try {
+            if (typeof localStorage !== 'undefined') {
+              const stored = localStorage.getItem('knots:mnemonic:' + normalized);
+              if (stored) mnemonic = stored;
+            }
+          } catch {}
+        }
+        if (!mnemonic) {
+          mnemonic = generateMnemonicFallback();
+          try { if (typeof localStorage !== 'undefined') localStorage.setItem('knots:mnemonic:' + normalized, mnemonic); } catch {}
+        }
+        const user = knotsUserFromIdentity(normalized, mnemonic);
+        const token = `knots_${normalized}_${Date.now()}`;
+        await secureStorage.setToken(token);
+        await secureStorage.setRefreshToken(token);
+        try { if (typeof localStorage !== 'undefined') { localStorage.setItem('knots:lastId', normalized); localStorage.setItem('knots:mnemonic:' + normalized, mnemonic); } } catch {}
+        set((state) => {
+          state.user = user;
+          state.accessToken = token;
+          state.refreshToken = token;
+          state.isAuthenticated = true;
+          state.loading = false;
+          state.initialized = true;
+        });
+      } catch (error) {
+        set((state) => {
+          state.error = error instanceof Error ? error.message : 'Knots auth failed';
+          state.loading = false;
+        });
+        throw error;
+      }
+    },
+
+    knotsCreateIdentity: async () => {
+      set((state) => {
+        state.loading = true;
+        state.error = null;
+      });
+      try {
+        let knotsIdRaw: string | null = null;
+        let mnemonic: string | null = null;
+        const bridge: any = (typeof window !== 'undefined' ? (window as any).knots : null);
+        if (bridge?.init) {
+          const res: any = await bridge.init();
+          if (res && res.success === false) throw new Error(res.message || 'Init failed');
+          if (res?.knotsIdRaw || res?.knotsId) {
+            const raw = res.knotsIdRaw || res.knotsId;
+            knotsIdRaw = normalizeKnotsIdLocal(String(raw)) || generateKnotsIdFallback();
+            mnemonic = res.mnemonic || generateMnemonicFallback();
+          }
+        }
+        if (!knotsIdRaw) {
+          knotsIdRaw = generateKnotsIdFallback();
+          mnemonic = generateMnemonicFallback();
+          if (bridge?.auth) { try { await bridge.auth(knotsIdRaw); } catch {} }
+        }
+        if (!mnemonic) mnemonic = generateMnemonicFallback();
+        const user = knotsUserFromIdentity(knotsIdRaw!, mnemonic!);
+        const token = `knots_${knotsIdRaw}_${Date.now()}`;
+        await secureStorage.setToken(token);
+        await secureStorage.setRefreshToken(token);
+        try { if (typeof localStorage !== 'undefined') { localStorage.setItem('knots:lastId', knotsIdRaw!); localStorage.setItem('knots:mnemonic:' + knotsIdRaw!, mnemonic!); } } catch {}
+        set((state) => {
+          state.user = user;
+          state.accessToken = token;
+          state.refreshToken = token;
+          state.isAuthenticated = true;
+          state.loading = false;
+          state.initialized = true;
+        });
+        return { knotsId: formatKnotsIdLocal(knotsIdRaw!), mnemonic: mnemonic! };
+      } catch (error) {
+        set((state) => {
+          state.error = error instanceof Error ? error.message : 'Identity creation failed';
+          state.loading = false;
+        });
+        throw error;
+      }
+    },
+
+    knotsRecover: async (mnemonic: string) => {
+      set((state) => {
+        state.loading = true;
+        state.error = null;
+      });
+      try {
+        const clean = mnemonic.trim().toLowerCase().replace(/\s+/g, ' ');
+        const words = clean.split(' ').filter(Boolean);
+        if (words.length !== 12) throw new Error('Kurtarma anahtarı 12 kelime olmalı');
+        let knotsIdRaw: string | null = null;
+        let returnedMnemonic = clean;
+        const bridge: any = (typeof window !== 'undefined' ? (window as any).knots : null);
+        if (bridge?.mnemonicRecover) {
+          const res: any = await bridge.mnemonicRecover({ mnemonic: clean });
+          if (res && res.success === false) throw new Error(res.message || 'Recover failed');
+          if (res?.knotsIdRaw || res?.knotsId) {
+            knotsIdRaw = normalizeKnotsIdLocal(String(res.knotsIdRaw || res.knotsId)) || null;
+            if (res.mnemonic) returnedMnemonic = res.mnemonic;
+          }
+        }
+        if (!knotsIdRaw) {
+          // fallback deterministic derive (same as main.cjs)
+          let h = 0;
+          for (const ch of clean) h = ((h << 5) - h + ch.charCodeAt(0)) | 0;
+          h = Math.abs(h);
+          let digits = Math.abs(h).toString().padStart(8, '0');
+          // expand to 16 via pseudo
+          let seed = h;
+          while (digits.length < 16) {
+            seed = (seed * 1664525 + 1013904223) | 0;
+            digits += Math.abs(seed % 10).toString();
+          }
+          knotsIdRaw = digits.slice(0, 16).padEnd(16, '0');
+          if (/^0+$/.test(knotsIdRaw)) knotsIdRaw = '1' + knotsIdRaw.slice(1);
+        }
+        const user = knotsUserFromIdentity(knotsIdRaw!, returnedMnemonic);
+        const token = `knots_${knotsIdRaw}_${Date.now()}`;
+        await secureStorage.setToken(token);
+        await secureStorage.setRefreshToken(token);
+        try { if (typeof localStorage !== 'undefined') { localStorage.setItem('knots:lastId', knotsIdRaw!); localStorage.setItem('knots:mnemonic:' + knotsIdRaw!, returnedMnemonic); } } catch {}
+        set((state) => {
+          state.user = user;
+          state.accessToken = token;
+          state.refreshToken = token;
+          state.isAuthenticated = true;
+          state.loading = false;
+          state.initialized = true;
+        });
+      } catch (error) {
+        set((state) => {
+          state.error = error instanceof Error ? error.message : 'Recovery failed';
+          state.loading = false;
+        });
+        throw error;
+      }
+    },
+
+    getKnotsIdentity: async () => {
+      const bridge: any = (typeof window !== 'undefined' ? (window as any).knots : null);
+      if (bridge?.getIdentity) {
+        try {
+          const d: any = await bridge.getIdentity();
+          if (d) return { knotsId: d.knotsIdRaw || d.knotsId?.replace(/\D/g, ''), mnemonic: d.mnemonic };
+        } catch {}
+      }
+      try {
+        if (typeof localStorage !== 'undefined') {
+          const last = localStorage.getItem('knots:lastId');
+          if (last) {
+            const m = localStorage.getItem('knots:mnemonic:' + last);
+            if (m) return { knotsId: last, mnemonic: m };
+          }
+        }
+      } catch {}
+      return null;
+    },
+
     clearError: () => {
       set((state) => {
         state.error = null;
@@ -770,5 +1063,8 @@ export const authService = {
   restoreSession: () => useAuthStore.getState().restoreSession(),
   guestLogin: () => useAuthStore.getState().guestLogin(),
   changeSubscription: (plan: SubscriptionPlan) => useAuthStore.getState().changeSubscription(plan),
+  knotsAuth: (knotsId: string) => useAuthStore.getState().knotsAuth(knotsId),
+  knotsCreateIdentity: () => useAuthStore.getState().knotsCreateIdentity(),
+  knotsRecover: (mnemonic: string) => useAuthStore.getState().knotsRecover(mnemonic),
   clearError: () => useAuthStore.getState().clearError(),
 };

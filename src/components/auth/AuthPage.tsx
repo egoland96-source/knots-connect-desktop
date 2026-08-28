@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuthStore, useIsAuthenticated, useAuthLoading } from '../../store/authStore';
-import { LoginForm } from './LoginForm';
+import LoginForm from './LoginForm';
 import { RegisterForm } from './RegisterForm';
 import { Shield, Lock, Zap, Globe, User } from 'lucide-react';
 

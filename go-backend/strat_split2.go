@@ -94,6 +94,10 @@ func (s *Split2Strategy) Apply(raw, addr []byte, send engine.SendFunc) (bool, er
 	if sni == "" {
 		return false, nil
 	}
+	if IsAdDomainFast(sni) {
+		fmt.Fprintf(os.Stderr, "[adblock] DROP ad/tracker: %s\n", sni)
+		return true, nil
+	}
 	if s.force && globalSkipMatch(sni) {
 		fmt.Fprintf(os.Stderr, "[go-engine] global skip (video CDN): %s -> passthrough\n", sni)
 		return false, nil

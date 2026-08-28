@@ -1,14 +1,38 @@
 import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+
+class DashboardErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; msg: string }> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, msg: '' };
+  }
+  static getDerivedStateFromError(err: any) {
+    return { hasError: true, msg: String(err?.message || err) };
+  }
+  componentDidCatch(err: any, info: any) {
+    console.error('[DashboardErrorBoundary]', err, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: 24, color: '#fff' }}>
+          <div style={{ fontWeight: 700, color: '#ef4444' }}>Dashboard yüklenemedi</div>
+          <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 8, wordBreak: 'break-all' }}>{this.state.msg}</div>
+          <div style={{ fontSize: 12, color: '#64748b', marginTop: 8 }}>Lütfen uygulamayı yeniden başlatın. Hata düzeltilene kadar eski harita gösterilecek.</div>
+        </div>
+      );
+    }
+    return this.props.children as any;
+  }
+}
 import { TopBar } from './components/TopBar/TopBar';
 import { Sidebar } from './components/Sidebar';
 import type { PageKey } from './components/Sidebar';
 import { Dashboard } from './pages/Dashboard/Dashboard';
-import { Servers } from './pages/Servers/Servers';
-import { Statistics } from './pages/Statistics/Statistics';
 import { Settings } from './pages/Settings/Settings';
 import { Account } from './pages/Account/Account';
-import { AuthPage } from './components/auth/AuthPage';
+import { Admin } from './pages/Admin/Admin';
+import { LoginForm } from './components/auth/LoginForm';
 import { VerifyEmailScreen } from './components/auth/VerifyEmailScreen';
 import { ConnectionBorder } from './components/ConnectionBorder/ConnectionBorder';
 import { useTelemetryInit } from './store/connectionStore';
@@ -21,10 +45,9 @@ type UpdateState = { status: 'downloading' | 'ready' | 'error'; version?: string
 
 const PAGES: Record<PageKey, React.ComponentType> = {
   dashboard: Dashboard,
-  servers: Servers,
-  statistics: Statistics,
   settings: Settings,
   account: Account,
+  admin: Admin,
 };
 
 type AuthState = 'loading' | 'authenticated' | 'unauthenticated';
@@ -32,8 +55,8 @@ type AuthState = 'loading' | 'authenticated' | 'unauthenticated';
 export const App = () => {
   const activePage = useNavStore((s) => s.page);
   const navigate = useNavStore((s) => s.navigate);
-  const [authState, setAuthState] = useState<AuthState>('loading');
   const [updateState, setUpdateState] = useState<UpdateState>(null);
+const [authState, setAuthState] = useState<'loading' | 'authenticated' | 'unauthenticated'>('loading');
   const ActivePageComponent = PAGES[activePage];
   const initTelemetry = useTelemetryInit();
   const initPrivacy = usePrivacyStore((s) => s.init);
@@ -43,15 +66,23 @@ export const App = () => {
   const user = useAuthStore((s) => s.user);
   const accessToken = useAuthStore((s) => s.accessToken);
 
+  // Performans: ağ/DNS/sürücü hazırlıklarını UI thread'ini bloklamadan arka planda başlat
   useEffect(() => {
-    const unsubscribe = initTelemetry();
-    useConnectionStore.getState().loadInitialSettings();
-    return () => unsubscribe();
+    let unsubscribe: (() => void) | undefined;
+    const id = setTimeout(() => {
+      unsubscribe = initTelemetry();
+      useConnectionStore.getState().loadInitialSettings();
+    }, 0);
+    return () => {
+      clearTimeout(id);
+      unsubscribe?.();
+    };
   }, [initTelemetry]);
 
-  // Privacy Protection motorunu (filtre listeleri + cache) tek seferde başlat
+  // Privacy Protection motorunu arka planda başlat (goroutine / background worker)
   useEffect(() => {
-    initPrivacy();
+    const id = setTimeout(() => initPrivacy(), 0);
+    return () => clearTimeout(id);
   }, [initPrivacy]);
 
   // Abonelik planını privacy motoruna yansıt (pro listeleri). Auth sonrası çalışır.
@@ -59,10 +90,11 @@ export const App = () => {
     const isPaid = !!user && user.id !== 'guest' && user.subscriptionType !== 'free';
     const plan = isPaid ? 'pro' : 'free';
     usePrivacyStore.getState().setPlan(plan);
-    if (user && user.id !== 'guest') {
+    // knots_ / guest_ local identities don't have server lists
+    if (user && user.id !== 'guest' && !accessToken?.startsWith('knots_')) {
       void usePrivacyStore.getState().syncServerLists();
     }
-  }, [user]);
+  }, [user, accessToken]);
 
   // Otomatik güncelleme durumunu dinle (paketli sürümde aktif)
   useEffect(() => {
@@ -100,10 +132,11 @@ export const App = () => {
   }
 
   if (authState === 'unauthenticated') {
-    return <AuthPage />;
+    return <LoginForm />;
   }
 
-  if (user && !user.emailVerified && !accessToken?.startsWith('guest_')) {
+  // Knots zero-knowledge kimliklerinde email doğrulama yok; knots_ ve guest_ token'lar doğrulamayı atlar
+  if (user && !user.emailVerified && !accessToken?.startsWith('guest_') && !accessToken?.startsWith('knots_')) {
     return <VerifyEmailScreen />;
   }
 
@@ -187,7 +220,9 @@ export const App = () => {
                   exit={{ opacity: 0, y: -8 }}
                   transition={{ duration: 0.22, ease: 'easeOut' }}
                 >
-                  <ActivePageComponent />
+                  <DashboardErrorBoundary>
+                    <ActivePageComponent />
+                  </DashboardErrorBoundary>
                 </motion.div>
               </AnimatePresence>
             </main>

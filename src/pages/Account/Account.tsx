@@ -40,14 +40,16 @@ export const Account: React.FC = () => {
   const [savingPlan, setSavingPlan] = useState(false);
   const user = useAuthStore((s) => s.user);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const token = useAuthStore((s) => s.accessToken);
   const loadProfile = useAuthStore((s) => s.loadProfile);
   const changeSubscription = useAuthStore((s) => s.changeSubscription);
 
   useEffect(() => {
-    if (isAuthenticated) {
+    // Knots_ / guest_ local identities have no backend profile
+    if (isAuthenticated && token && !token.startsWith('knots_') && !token.startsWith('guest_')) {
       loadProfile();
     }
-  }, [isAuthenticated, loadProfile]);
+  }, [isAuthenticated, token, loadProfile]);
 
   if (!isAuthenticated || !user) {
     return (
@@ -123,8 +125,10 @@ export const Account: React.FC = () => {
                 </div>
                 <div style={{ fontSize: 13.5, color: 'var(--text-muted)', marginTop: 3 }}>{user.email}</div>
                 <div style={{ display: 'flex', gap: 8, marginTop: 'var(--space-2)' }}>
-                  <Badge tone={user.emailVerified ? 'success' : 'warning'}>{user.emailVerified ? 'Verified' : 'Email pending'}</Badge>
-                  <Badge>ID: {user.id.slice(0, 8).toUpperCase()}</Badge>
+                  <Badge tone="neutral">ID: {(user.id.match(/.{4}/g)?.join('-') ?? user.id)}</Badge>
+                <Button variant="secondary" size="sm" onClick={() => {
+                  navigator.clipboard.writeText(user.id);
+                }} icon={RefreshCw}>Kopyala</Button>
                 </div>
               </div>
               <Button variant="secondary" size="sm" icon={RefreshCw}>Edit</Button>

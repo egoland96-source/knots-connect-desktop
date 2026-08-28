@@ -5,7 +5,8 @@ class AuthAPI {
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const token = await window.knotsAuth?.getToken();
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) {
+    // knots_ / guest_ are local zero-knowledge IDs — don't send to backend
+    if (token && !token.startsWith('knots_') && !token.startsWith('guest_')) {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
@@ -23,12 +24,22 @@ class AuthAPI {
     return res.json();
   }
 
-  login(credentials: LoginRequest): Promise<AuthResponse> {
-    return this.request<AuthResponse>('POST', '/api/v1/auth/login', credentials);
+  private async withHWID<T extends { hwid?: string }>(data: T): Promise<T> {
+    try {
+      const hwid = await (window as any).knots?.getHWID?.();
+      if (hwid) return { ...data, hwid };
+    } catch {}
+    return data;
   }
 
-  register(userData: RegisterRequest): Promise<AuthResponse> {
-    return this.request<AuthResponse>('POST', '/api/v1/auth/register', userData);
+  async login(credentials: LoginRequest): Promise<AuthResponse> {
+    const body = await this.withHWID(credentials);
+    return this.request<AuthResponse>('POST', '/api/v1/auth/login', body);
+  }
+
+  async register(userData: RegisterRequest): Promise<AuthResponse> {
+    const body = await this.withHWID(userData);
+    return this.request<AuthResponse>('POST', '/api/v1/auth/register', body);
   }
 
   getProfile(): Promise<User> {

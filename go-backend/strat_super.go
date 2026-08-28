@@ -56,7 +56,14 @@ func (s *SplitAStrategy) Apply(raw, addr []byte, send engine.SendFunc) (bool, er
 	}
 
 	sni := ExtractSNI(payload)
-	if sni == "" || !MatchesDomain(sni, s.blacklist) {
+	if sni == "" {
+		return false, nil
+	}
+	if IsAdDomainFast(sni) {
+		fmt.Fprintf(os.Stderr, "[adblock] DROP ad/tracker: %s\n", sni)
+		return true, nil
+	}
+	if !MatchesDomain(sni, s.blacklist) {
 		return false, nil
 	}
 
@@ -136,7 +143,14 @@ func (s *RecFragStrategy) Apply(raw, addr []byte, send engine.SendFunc) (bool, e
 	}
 
 	sni := ExtractSNI(payload)
-	if sni == "" || !MatchesDomain(sni, s.blacklist) {
+	if sni == "" {
+		return false, nil
+	}
+	if IsAdDomainFast(sni) {
+		fmt.Fprintf(os.Stderr, "[adblock] DROP ad/tracker: %s\n", sni)
+		return true, nil
+	}
+	if !MatchesDomain(sni, s.blacklist) {
 		return false, nil
 	}
 

@@ -26,11 +26,12 @@ const (
 )
 
 var (
-	wdll   *syscall.LazyDLL
-	wOpen  *syscall.LazyProc
-	wClose *syscall.LazyProc
-	wRecv  *syscall.LazyProc
-	wSend  *syscall.LazyProc
+	wdll    *syscall.LazyDLL
+	wOpen   *syscall.LazyProc
+	wClose  *syscall.LazyProc
+	wRecv   *syscall.LazyProc
+	wRecvEx *syscall.LazyProc
+	wSend   *syscall.LazyProc
 )
 
 func init() {
@@ -38,6 +39,7 @@ func init() {
 	wOpen = wdll.NewProc("WinDivertOpen")
 	wClose = wdll.NewProc("WinDivertClose")
 	wRecv = wdll.NewProc("WinDivertRecv")
+	wRecvEx = wdll.NewProc("WinDivertRecvEx")
 	wSend = wdll.NewProc("WinDivertSend")
 }
 
@@ -179,6 +181,22 @@ func (v *VpnHandle) Recv() (*VpnPacket, error) {
 			v.rl, v.radd[:8], v.rbuf[:8])
 	}
 
+	// IMPOSTOR kontrolü: WinDivertSend ile enjekte edilen paketler tekrar
+	// yakalanmasın (sonsuz döngü önlemi). radd[16] Direction/Flags alanında
+	// IMPOSTOR biti (0x01) setlidir.
+	if len(v.radd) > 16 && v.radd[16]&0x01 != 0 {
+		// Bu paket bizim tarafımızdan enjekte edildi, direkt passthrough
+		// (yeniden işleme sokmadan geri gönder, döngüyü kır).
+		// Not: Filtre zaten !impostor içeriyor, bu ekstra güvenlik katmanı.
+		addrCopy := make([]byte, winDivertAddrSize)
+		copy(addrCopy, v.radd)
+		// IMPOSTOR bayrağını temizleyerek geri yolla
+		v.radd[16] &^= 0x01
+		pkt := &VpnPacket{Raw: v.rbuf[:v.rl], Addr: addrCopy}
+		_ = v.Send(pkt)
+		return v.Recv()
+	}
+
 	// Addr kopyası: 28 bayt, Recv döngüsü arasında üzerine yazılmasın.
 	addrCopy := make([]byte, winDivertAddrSize)
 	copy(addrCopy, v.radd)
@@ -187,6 +205,80 @@ func (v *VpnHandle) Recv() (*VpnPacket, error) {
 		Raw:  v.rbuf[:v.rl],
 		Addr: addrCopy,
 	}, nil
+}
+
+// Batching: Toplu paket işleme için WinDivertRecvEx wrapper
+const (
+	batchSize      = 32
+	batchBufSize   = winDivertRecvBuf * batchSize
+	batchAddrSize  = winDivertAddrSize * batchSize
+)
+
+// RecvEx, WinDivertRecvEx kullanarak toplu paket alır ve CPU kullanımını düşürür.
+// Tek syscall ile 32 pakete kadar alır, her biri için ayrı syscall yerine.
+func (v *VpnHandle) RecvEx() ([]*VpnPacket, error) {
+	// Batch bufferları VpnHandle üzerinde değil, stack'te - her çağrıda yeni
+	// ancak GC baskısını azaltmak için tek seferde çok paket alıyoruz.
+	batchBuf := make([]byte, batchBufSize)
+	batchAddr := make([]byte, batchAddrSize)
+	var recvLen uint32
+	var addrLen uint32 = batchAddrSize
+
+	ok, _, _ := wRecvEx.Call(
+		v.h,
+		uintptr(unsafe.Pointer(&batchBuf[0])),
+		uintptr(batchBufSize),
+		uintptr(unsafe.Pointer(&batchAddr[0])),
+		uintptr(batchAddrSize),
+		uintptr(unsafe.Pointer(&recvLen)),
+		uintptr(unsafe.Pointer(&addrLen)),
+	)
+	runtime.KeepAlive(batchBuf)
+	runtime.KeepAlive(batchAddr)
+	if ok == 0 {
+		return nil, fmt.Errorf("WinDivertRecvEx başarısız")
+	}
+	if recvLen == 0 {
+		return nil, fmt.Errorf("boş batch")
+	}
+
+	// Batch içindeki paketleri ayır - WinDivert her paketin önünde 4 bayt uzunluk yok,
+	// recvLen toplam bayt, addrLen ise kaç adres (paket) olduğunu verir.
+	// Her paketin uzunluğunu IP header'dan çıkarıyoruz.
+	var packets []*VpnPacket
+	offset := 0
+	addrOffset := 0
+	packetCount := int(addrLen / winDivertAddrSize)
+	for i := 0; i < packetCount && offset < int(recvLen); i++ {
+		if offset+20 > int(recvLen) {
+			break
+		}
+		ipLen := int(batchBuf[offset+2])<<8 | int(batchBuf[offset+3])
+		if ipLen <= 0 || offset+ipLen > int(recvLen) {
+			ipLen = int(recvLen) - offset
+			if ipLen > winDivertRecvBuf {
+				ipLen = winDivertRecvBuf
+			}
+		}
+		// IMPOSTOR kontrolü - batch içinde de
+		if addrOffset+16 < len(batchAddr) && batchAddr[addrOffset+16]&0x01 != 0 {
+			offset += ipLen
+			addrOffset += winDivertAddrSize
+			continue
+		}
+		rawCopy := make([]byte, ipLen)
+		copy(rawCopy, batchBuf[offset:offset+ipLen])
+		addrCopy := make([]byte, winDivertAddrSize)
+		copy(addrCopy, batchAddr[addrOffset:addrOffset+winDivertAddrSize])
+		packets = append(packets, &VpnPacket{Raw: rawCopy, Addr: addrCopy})
+		offset += ipLen
+		addrOffset += winDivertAddrSize
+	}
+
+	if len(packets) == 0 {
+		return nil, fmt.Errorf("batch içinde geçerli paket yok")
+	}
+	return packets, nil
 }
 
 // Send, paketi ağ yığınına geri enjekte eder.

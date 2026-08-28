@@ -20,9 +20,9 @@ import { useConnectionStore } from '../../store/connectionStore';
  */
 
 // Perimeter starting at the bottom-center, going counter-clockwise
-// (percentage coords so it always covers the real window frame):
-// bottom-center → bottom-left → top-left → top-right → bottom-right → close
-const TRAVEL_PATH = 'M 50% 100% L 0% 100% L 0% 0% L 100% 0% L 100% 100% Z';
+// Use 0..100 viewBox coords — NEVER use % in SVG path d (Chrome throws
+// "Expected number, M 50% 100%"). The svg below has viewBox 0 0 100 100.
+const TRAVEL_PATH = 'M 50 100 L 0 100 L 0 0 L 100 0 L 100 100 Z';
 
 // path-units (0..100) per millisecond — full loop durations:
 // connecting 4.5s, connected 9s, disconnected 14s
@@ -63,7 +63,7 @@ export const ConnectionBorder: React.FC = () => {
         }}
       />
 
-      <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
+      <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} viewBox="0 0 100 100" preserveAspectRatio="none">
         <defs>
           <filter id="knots-border-glow" x="-80%" y="-80%" width="260%" height="260%">
             <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur" />

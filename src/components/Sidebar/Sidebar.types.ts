@@ -1,6 +1,6 @@
 import type React from 'react';
 
-export type PageKey = 'dashboard' | 'servers' | 'statistics' | 'settings' | 'account';
+export type PageKey = 'dashboard' | 'settings' | 'account' | 'admin';
 
 export interface SidebarItem {
   key: PageKey;

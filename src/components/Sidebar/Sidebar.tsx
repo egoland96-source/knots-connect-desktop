@@ -1,17 +1,16 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { LayoutDashboard, Server, BarChart3, Settings, User, LogOut } from 'lucide-react';
+import { LayoutDashboard, Settings, User, Shield, LogOut } from 'lucide-react';
 import { useConnectionStore } from '../../store/connectionStore';
 import { useAuthStore } from '../../store/authStore';
 import type { PageKey, SidebarProps } from './Sidebar.types';
 import { Badge } from '../ui';
 
-const NAV_ITEMS: { key: PageKey; label: string; icon: React.ComponentType<any> }[] = [
+const NAV_ITEMS: { key: PageKey; label: string; icon: React.ComponentType<any>; adminOnly?: boolean }[] = [
   { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { key: 'servers', label: 'Servers', icon: Server },
-  { key: 'statistics', label: 'Statistics', icon: BarChart3 },
   { key: 'settings', label: 'Settings', icon: Settings },
   { key: 'account', label: 'Account', icon: User },
+  { key: 'admin', label: 'Admin', icon: Shield, adminOnly: true },
 ];
 
 export const Sidebar = React.memo(({ activePage, onNavigate }: SidebarProps) => {
@@ -19,6 +18,8 @@ export const Sidebar = React.memo(({ activePage, onNavigate }: SidebarProps) => 
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const [confirmLogout, setConfirmLogout] = React.useState(false);
+
+  const items = NAV_ITEMS.filter((it) => !it.adminOnly || user?.isAdmin);
 
   const displayName = user?.username || 'Operator';
   const avatarLetter = displayName.charAt(0).toUpperCase();
@@ -38,6 +39,7 @@ export const Sidebar = React.memo(({ activePage, onNavigate }: SidebarProps) => 
 
   return (
     <nav
+      className="sidebar"
       style={{
         width: 240,
         flexShrink: 0,
@@ -72,7 +74,7 @@ export const Sidebar = React.memo(({ activePage, onNavigate }: SidebarProps) => 
 
       {/* MENÜ */}
       <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>
-        {NAV_ITEMS.map((item) => {
+        {items.map((item) => {
           const isActive = item.key === activePage;
           const Icon = item.icon;
           return (
@@ -120,7 +122,7 @@ export const Sidebar = React.memo(({ activePage, onNavigate }: SidebarProps) => 
                   />
                 )}
                 <Icon size={18} strokeWidth={isActive ? 2.2 : 1.8} />
-                {item.label}
+                <span className="sidebar-label">{item.label}</span>
               </button>
             </li>
           );

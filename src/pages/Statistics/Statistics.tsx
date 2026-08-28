@@ -20,11 +20,11 @@ const formatBytes = (bytes: number) => {
 };
 
 const ACTIVITY_LOG = [
-  { icon: CheckCircle2, color: '#22C55E', text: 'Connection established · Netherlands', time: '14:32' },
-  { icon: Info, color: '#3DB5FF', text: 'Encryption switched to XOR Mask', time: '14:31' },
-  { icon: AlertTriangle, color: '#F59E0B', text: 'High packet load detected on 443', time: '14:28' },
-  { icon: CheckCircle2, color: '#22C55E', text: 'DNS leak protection engaged', time: '14:26' },
-  { icon: Info, color: '#3DB5FF', text: 'Kill switch armed', time: '14:25' },
+  { icon: CheckCircle2, color: '#22C55E', text: 'Connection established · Netherlands', time: '14:32:18' },
+  { icon: Info, color: '#3DB5FF', text: 'Encryption switched to XOR Mask', time: '14:31:42' },
+  { icon: AlertTriangle, color: '#F59E0B', text: 'High packet load detected on 443', time: '14:28:07' },
+  { icon: CheckCircle2, color: '#22C55E', text: 'DNS leak protection engaged', time: '14:26:33' },
+  { icon: Info, color: '#3DB5FF', text: 'Kill switch armed', time: '14:25:11' },
 ];
 
 // Safe number utilities

@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <title>Knots Connect</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+        font-family: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      }
+      .wrap {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 30px;
+        background: transparent;
+      }
+      #logo {
+        width: 300px;
+        height: 300px;
+        display: block;
+        filter: drop-shadow(0 0 26px rgba(28, 200, 255, 0.25));
+      }
+      .brand {
+        font-weight: 800;
+        letter-spacing: 3px;
+        font-size: 25px;
+        color: #eaf6ff;
+        text-shadow: 0 0 22px rgba(28, 200, 255, 0.35);
+      }
+      .brand span {
+        color: #1cc8ff;
+      }
+      .tag {
+        margin-top: -20px;
+        font-size: 13px;
+        letter-spacing: 5px;
+        color: #8fb6c9;
+        text-transform: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <canvas id="logo" width="300" height="300"></canvas>
+      <div class="brand">KNOTS<span>·</span>CONNECT</div>
+      <div class="tag">Connect . Protect . Bypass</div>
+    </div>
+
+    <script>
+      (function () {
+        const BLUE = '#2B7BFF';
+        const VIOLET = '#ffffff';
+        const TRACK = '#E8E8E8';
+        const SIZE = 400;
+        const CX = 200;
+        const CY = 200;
+        const A = 94;
+        const B = 23;
+        const ANGLE = (39 * Math.PI) / 180;
+        const STROKE = 30;
+        const STEPS = 48;
+        const CYCLE_MS = 4800;
+
+        function rot(x, y, ang) {
+          const c = Math.cos(ang);
+          const s = Math.sin(ang);
+          return { x: x * c - y * s, y: x * s + y * c };
+        }
+        function stadium(a, b, ang, cx, cy) {
+          const pts = [];
+          const push = (x, y) => {
+            const p = rot(x, y, ang);
+            pts.push({ x: p.x + cx, y: p.y + cy });
+          };
+          for (let i = 0; i < STEPS; i++) {
+            const t = i / STEPS;
+            push(-a + 2 * a * t, b);
+          }
+          for (let i = 0; i <= STEPS; i++) {
+            const t = i / STEPS;
+            const th = Math.PI / 2 - Math.PI * t;
+            push(a + b * Math.cos(th), b * Math.sin(th));
+          }
+          for (let i = 0; i < STEPS; i++) {
+            const t = i / STEPS;
+            push(a - 2 * a * t, -b);
+          }
+          for (let i = 0; i <= STEPS; i++) {
+            const t = i / STEPS;
+            const th = -Math.PI / 2 - Math.PI * t;
+            push(-a + b * Math.cos(th), b * Math.sin(th));
+          }
+          return pts;
+        }
+        function segIntersect(p1, p2, q1, q2) {
+          const rx = p2.x - p1.x;
+          const ry = p2.y - p1.y;
+          const sx = q2.x - q1.x;
+          const sy = q2.y - q1.y;
+          const den = rx * sy - ry * sx;
+          if (Math.abs(den) < 1e-9) return null;
+          const t = ((q1.x - p1.x) * sy - (q1.y - p1.y) * sx) / den;
+          const u = ((q1.x - p1.x) * ry - (q1.y - p1.y) * rx) / den;
+          if (t < 1e-6 || t > 1 - 1e-6 || u < 1e-6 || u > 1 - 1e-6) return null;
+          return { x: p1.x + t * rx, y: p1.y + t * ry };
+        }
+        function insertPoint(loop, hit, segIdx) {
+          const out = [];
+          for (let i = 0; i < loop.length; i++) {
+            out.push(loop[i]);
+            if (i === segIdx) out.push({ x: hit.x, y: hit.y });
+          }
+          return out;
+        }
+        function closestHit(blue, gray) {
+          const hits = [];
+          for (let i = 0; i < blue.length; i++) {
+            const a1 = blue[i];
+            const a2 = blue[(i + 1) % blue.length];
+            for (let j = 0; j < gray.length; j++) {
+              const b1 = gray[j];
+              const b2 = gray[(j + 1) % gray.length];
+              const p = segIntersect(a1, a2, b1, b2);
+              if (p) hits.push({ p, bi: i, gi: j });
+            }
+          }
+          const clustered = [];
+          for (const h of hits) {
+            if (!clustered.some((c) => Math.hypot(c.p.x - h.p.x, c.p.y - h.p.y) < 5)) {
+              clustered.push(h);
+            }
+          }
+          clustered.sort((a, b) => b.p.x - a.p.x);
+          return clustered[0] || { p: { x: CX, y: CY }, bi: 0, gi: 0 };
+        }
+        function rotateTo(loop, idx) {
+          const n = loop.length;
+          const out = [];
+          for (let i = 0; i <= n; i++) out.push(loop[(idx + i) % n]);
+          return out;
+        }
+        function cumlen(pts) {
+          const lens = [0];
+          let total = 0;
+          for (let i = 1; i < pts.length; i++) {
+            total += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+            lens.push(total);
+          }
+          return { lens, total };
+        }
+        function pointAt(pts, lens, total, d) {
+          const t = ((d % total) + total) % total;
+          let i = 0;
+          while (i < lens.length - 2 && lens[i + 1] < t) i++;
+          const span = lens[i + 1] - lens[i] || 1;
+          const u = (t - lens[i]) / span;
+          return {
+            x: pts[i].x + (pts[i + 1].x - pts[i].x) * u,
+            y: pts[i].y + (pts[i + 1].y - pts[i].y) * u,
+          };
+        }
+        function drawSubpath(ctx, pts, lens, total, start, length) {
+          const s = ((start % total) + total) % total;
+          const e = s + length;
+          ctx.beginPath();
+          let started = false;
+          const step = Math.max(1.5, total / 400);
+          for (let d = s; d <= e; d += step) {
+            const p = pointAt(pts, lens, total, d);
+            if (!started) {
+              ctx.moveTo(p.x, p.y);
+              started = true;
+            } else ctx.lineTo(p.x, p.y);
+          }
+          const pEnd = pointAt(pts, lens, total, e);
+          ctx.lineTo(pEnd.x, pEnd.y);
+          ctx.stroke();
+        }
+        function drawLoop(ctx, pts) {
+          ctx.beginPath();
+          ctx.moveTo(pts[0].x, pts[0].y);
+          for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+          ctx.closePath();
+          ctx.stroke();
+        }
+        function buildPaths() {
+          const blue0 = stadium(A, B, -ANGLE, CX, CY);
+          const gray0 = stadium(A, B, ANGLE, CX, CY);
+          const hit = closestHit(blue0, gray0);
+          const blue = insertPoint(blue0, hit.p, hit.bi);
+          const gray = insertPoint(gray0, hit.p, hit.gi);
+          const bIdx = blue.findIndex((p) => Math.abs(p.x - hit.p.x) < 0.01 && Math.abs(p.y - hit.p.y) < 0.01);
+          const gIdx = gray.findIndex((p) => Math.abs(p.x - hit.p.x) < 0.01 && Math.abs(p.y - hit.p.y) < 0.01);
+          const blueFrom = rotateTo(blue, Math.max(0, bIdx));
+          const grayFrom = rotateTo(gray, Math.max(0, gIdx));
+          const combined = [...blueFrom, ...grayFrom.slice(1)];
+          return { blue, gray, combined };
+        }
+
+        const canvas = document.getElementById('logo');
+        const ctx = canvas.getContext('2d');
+        const { blue, gray, combined } = buildPaths();
+        const { lens, total } = cumlen(combined);
+        const oneLoop = total / 2;
+        const snakeLen = oneLoop * 0.999;
+        const start = performance.now();
+
+        function paint(now) {
+          const dpr = Math.min(window.devicePixelRatio || 1, 2);
+          const w = canvas.clientWidth;
+          const h = canvas.clientHeight;
+          if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+            canvas.width = Math.round(w * dpr);
+            canvas.height = Math.round(h * dpr);
+          }
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          ctx.clearRect(0, 0, w, h);
+          const scale = Math.min(w, h) / SIZE;
+          ctx.translate((w - SIZE * scale) / 2, (h - SIZE * scale) / 2);
+          ctx.scale(scale, scale);
+
+          ctx.lineCap = 'butt';
+          ctx.lineJoin = 'miter';
+          ctx.miterLimit = 2;
+
+          ctx.strokeStyle = TRACK;
+          ctx.lineWidth = STROKE;
+          ctx.shadowBlur = 0;
+          drawLoop(ctx, blue);
+          drawLoop(ctx, gray);
+
+          const t = ((now - start) / CYCLE_MS) % 1;
+          const d0 = t * total;
+          const d1 = d0 + total * 0.5;
+
+          ctx.lineWidth = STROKE;
+
+          ctx.shadowColor = VIOLET;
+          ctx.shadowBlur = 0;
+          ctx.strokeStyle = VIOLET;
+          drawSubpath(ctx, combined, lens, total, d1, snakeLen);
+
+          ctx.shadowColor = BLUE;
+          ctx.shadowBlur = 0;
+          ctx.strokeStyle = BLUE;
+          drawSubpath(ctx, combined, lens, total, d0, snakeLen);
+
+          requestAnimationFrame(paint);
+        }
+        requestAnimationFrame(paint);
+      })();
+    </script>
+  </body>
+</html>

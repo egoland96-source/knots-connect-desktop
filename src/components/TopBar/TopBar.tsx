@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useConnectionStore } from '../../store/connectionStore';
 import { Minus, Square, X, MapPin, Bell, Settings } from 'lucide-react';
@@ -22,6 +22,22 @@ const formatUptime = (sec: number | null) => {
 
 const safeNum = (value: number | null | undefined): number => 
   typeof value === 'number' && isFinite(value) ? value : 0;
+
+const LiveClock: React.FC = () => {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const hh = now.getHours().toString().padStart(2, '0');
+  const mm = now.getMinutes().toString().padStart(2, '0');
+  const ss = now.getSeconds().toString().padStart(2, '0');
+  return (
+    <span style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--text-muted)', letterSpacing: '0.3px' }}>
+      {hh}:{mm}:{ss}
+    </span>
+  );
+};
 
 export const TopBar = React.memo(() => {
   // Read from store - no timers, no local state for connection data
@@ -189,10 +205,12 @@ export const TopBar = React.memo(() => {
           <Settings size={14} strokeWidth={2} />
         </button>
 
-        {/* Session Duration */}
+        {/* Session Duration — canlı HH:mm:ss */}
         <span style={{ fontSize: 13, fontFamily: 'monospace', color: 'var(--text-muted)', letterSpacing: '0.4px' }}>
-          {formatUptime(useConnectionStore.getState().uptimeSeconds)}
+          {formatUptime(useConnectionStore((s) => s.uptimeSeconds))}
         </span>
+        {/* Canlı sistem saati HH:mm:ss */}
+        <LiveClock />
 
         <div className="app-region-no-drag" style={{ display: 'flex', gap: 4 }}>
           <button

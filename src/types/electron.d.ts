@@ -45,7 +45,33 @@ export interface PrivacyBridgeApi {
   cacheRemove?: (name: string) => Promise<{ ok: boolean }>;
 }
 
+export interface KnotsIdentityResult {
+  success: boolean;
+  knotsId: string;
+  knotsIdRaw: string;
+  mnemonic: string;
+  message?: string;
+}
+
 export interface KnotsBridgeApi {
+  // Zero-knowledge anonymous identity (brifing: window.knots.auth / window.knots.init)
+  auth?: (knotsId: string) => Promise<KnotsIdentityResult>;
+  init?: () => Promise<KnotsIdentityResult>;
+  mnemonicRecover?: (payload: { mnemonic: string } | string) => Promise<KnotsIdentityResult>;
+  getIdentity?: () => Promise<{ knotsId: string; knotsIdRaw: string; mnemonic: string; createdAt: string } | null>;
+  // legacy alias
+  knotsAuth?: (knotsId: string) => Promise<KnotsIdentityResult>;
+  knotsInit?: () => Promise<KnotsIdentityResult>;
+
+  copyId?: (id: string) => Promise<{ success: boolean }>;
+  mnemonicGenerate?: () => Promise<{ mnemonic: string; knotsId: string }>;
+  qrGenerate?: () => Promise<any>;
+  engineSet?: (mode: string) => Promise<any>;
+  dpiSet?: (options: any) => Promise<any>;
+  shieldSet?: (enabled: boolean) => Promise<any>;
+  dohSet?: (provider: string) => Promise<any>;
+  splitSet?: (enabled: boolean) => Promise<any>;
+
   connect: (serverId?: string) => Promise<ConnectResult>;
   disconnect: () => Promise<DisconnectResult>;
   getStatus: () => Promise<EngineStatusPayload>;
@@ -53,7 +79,9 @@ export interface KnotsBridgeApi {
   setEngineMode: (mode: 'python' | 'go') => Promise<EngineModeResult>;
   getEncryptionMethod?: () => Promise<{ method_id: number } | number>;
   setEncryptionMethod?: (methodId: number) => Promise<any>;
-  
+  setDpiTechniques?: (techniques: string[]) => Promise<any>;
+  getHWID?: () => Promise<string | null>;
+
   // === CANLI AKIŞ VE DİNLENME KANALLARI ===
   onTelemetry: (callback: (data: TelemetryPayload) => void) => () => void;
   getSettings?: () => Promise<Record<string, any> | null>;

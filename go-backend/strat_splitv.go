@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"time"
 
 	"knots-go-backend/engine"
 )
@@ -79,6 +80,12 @@ func (s *SplitVStrategy) Apply(raw, addr []byte, send engine.SendFunc) (bool, er
 	if sni == "" {
 		return false, nil
 	}
+	// Ad-block check: If SNI is an ad/tracker, DROP instead of bypassing
+	// This prevents the engine from "rescuing" ad domains and causing 11% ad-block score
+	if IsAdDomainFast(sni) {
+		fmt.Fprintf(os.Stderr, "[adblock] DROP ad/tracker: %s\n", sni)
+		return true, nil
+	}
 	if s.force && globalSkipMatch(sni) {
 		fmt.Fprintf(os.Stderr, "[go-engine] global skip: %s -> passthrough\n", sni)
 		return false, nil
@@ -111,15 +118,13 @@ func (s *SplitVStrategy) Apply(raw, addr []byte, send engine.SendFunc) (bool, er
 	return true, nil
 }
 
-// sendFragmentsGood — GoodbyeDPI -k felsefesiyle ClientHello'yu çok parçaya
-// böler: SNI hostname bölgesi 2 baytlık minik segmentlere, öncesi/sonrası
-// iri parçalara ayrılır; hepsi art arda (gecikmesiz) gönderilir. İlk N-1
-// parça ACK-only, son parça PSH+ACK. Sonuç:
-//  1. Hiçbir segment 2 hostname karakterinden fazlasını taşımaz → SNI hiçbir
-//     pakette tam eşleşmez.
-//  2. Segment sayısı yüksek (hostname ~15 bayt ⇒ ~8 + çevre ~8 parça) →
-//     DPI'ın reassembly kuyruğu dolar → birleştirmeyi bırakır ve SNI'yi asla
-//     okuyamaz. Sunucu ise normal TCP reassembly ile tam ClientHello'yu alır.
+// sendFragmentsGood — Dinamik DPI Bypass: GoodbyeDPI -k felsefesiyle ClientHello'yu
+// rastgele parçalara böler: 10-30 bayt arası dinamik dilimler + mikrosaniyelik jitter.
+// SNI hostname bölgesi dahil tüm payload rastgele boyutlarda parçalanır.
+// Sonuç:
+//  1. Her bağlantıda farklı parçalanma deseni → DPI'ın statik reassembly kuralları çöker.
+//  2. Mikrosaniyelik jitter (50-300µs) → DPI'ın zaman penceresi tabanlı birleştirmesi bozulur.
+//  3. Sunucu normal TCP reassembly ile tam ClientHello'yu sorunsuz alır (sıra numaraları doğru).
 func sendFragmentsGood(raw, addr []byte, ipHdrLen, tcpHdrLen int, payload []byte, seqNum uint32, splitAt, hostLen int, send engine.SendFunc) {
 	var cuts []int
 
@@ -137,10 +142,12 @@ func sendFragmentsGood(raw, addr []byte, ipHdrLen, tcpHdrLen int, payload []byte
 			}
 		}
 
-		// Hostname ÖNCESİ: 64 baytlık iri parçalar
+		// Dinamik parçalama: 10-30 bayt arası rastgele dilimler
+		// Hostname ÖNCESİ: rastgele 10-30 bayt
 		p := 16
 		for p < hostStart {
-			e := p + 64
+			chunk := 10 + rand.Intn(21) // 10-30
+			e := p + chunk
 			if e > hostStart {
 				e = hostStart
 			}
@@ -148,28 +155,50 @@ func sendFragmentsGood(raw, addr []byte, ipHdrLen, tcpHdrLen int, payload []byte
 			p = e
 		}
 
-		// Hostname BÖLGESİ: 2 baytlık minik parçalar (SNI asla birleşmesin)
+		// Hostname BÖLGESİ: rastgele 10-30 bayt (SNI asla tek parçada birleşmesin, ama her seferinde farklı)
 		p = hostStart
-		for p+2 < hostEnd {
-			cuts = append(cuts, p+2)
-			p += 2
+		for p+10 < hostEnd {
+			chunk := 10 + rand.Intn(21)
+			if p+chunk > hostEnd {
+				chunk = hostEnd - p
+			}
+			if chunk < 10 {
+				chunk = 10
+			}
+			cuts = append(cuts, p+chunk)
+			p += chunk
 		}
-		cuts = append(cuts, hostEnd)
+		if p < hostEnd {
+			cuts = append(cuts, hostEnd)
+		}
 
-		// Hostname SONRASI: 64 baytlık iri parçalar
+		// Hostname SONRASI: rastgele 10-30 bayt
 		p = hostEnd
-		for p+64 < len(payload) {
-			cuts = append(cuts, p+64)
-			p += 64
+		for p+10 < len(payload) {
+			chunk := 10 + rand.Intn(21)
+			e := p + chunk
+			if e > len(payload) {
+				e = len(payload)
+			}
+			cuts = append(cuts, e)
+			p = e
 		}
 	}
 
-	if len(cuts) == 0 { // fallback: 2 parça (splitAt)
-		cuts = append(cuts, splitAt)
+	if len(cuts) == 0 { // fallback: rastgele noktadan 2 parça
+		// Fallback'te bile rastgele offset
+		randOffset := splitAt + rand.Intn(11) - 5 // -5 to +5
+		if randOffset < 16 {
+			randOffset = 16
+		}
+		if randOffset > len(payload)-16 {
+			randOffset = len(payload) - 16
+		}
+		cuts = append(cuts, randOffset)
 	}
 
 	prev := 0
-	for _, c := range cuts {
+	for i, c := range cuts {
 		if c <= prev {
 			continue
 		}
@@ -181,8 +210,14 @@ func sendFragmentsGood(raw, addr []byte, ipHdrLen, tcpHdrLen int, payload []byte
 		sendRawStrat(frag, addr, send)
 		seqNum += uint32(c - prev)
 		prev = c
+		// Mikrosaniyelik jitter: her parçadan sonra 50-300µs rastgele bekleme
+		// DPI'ın zaman penceresi tabanlı reassembly'sini bozar, sunucuyu etkilemez
+		if !last && i < len(cuts)-1 {
+			jitter := time.Duration(50+rand.Intn(251)) * time.Microsecond // 50-300µs
+			time.Sleep(jitter)
+		}
 	}
-	if prev < len(payload) { // kesim noktası hatalıysa kalanı da gönder
+	if prev < len(payload) {
 		frag := buildTCPFragment(raw, ipHdrLen, tcpHdrLen, payload[prev:], seqNum, true)
 		sendRawStrat(frag, addr, send)
 	}
