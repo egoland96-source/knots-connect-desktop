@@ -163,7 +163,7 @@ let appSettingsMemory = {
   dnsLeakProtection: true,
   startWithWindows: false,
   autoUpdate: true,
-  aggressiveMode: true,
+  aggressiveMode: false,
   adblock: true,
   dnsMode: 'local', // local | cloudflare
 };

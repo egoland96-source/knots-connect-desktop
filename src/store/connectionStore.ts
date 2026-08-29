@@ -137,7 +137,7 @@ export const useConnectionStore = create<ConnectionStoreState>()((set, get) => (
     dnsLeakProtection: true,
     startWithWindows: false,
     autoUpdate: true,
-    aggressiveMode: true,
+    aggressiveMode: false,
     adblock: true,
   },
 

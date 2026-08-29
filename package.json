@@ -66,6 +66,17 @@
       ],
       "requestedExecutionLevel": "requireAdministrator"
     },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Knots Connect",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "displayLanguageSelector": false
+    },
     "npmRebuild": false
   },
   "dependencies": {
