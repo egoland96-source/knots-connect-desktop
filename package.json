@@ -1,6 +1,6 @@
 {
   "name": "knots-connect-desktop",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Knots Connect - Electron + React masaÃƒÂ¼stÃƒÂ¼ istemcisi",
   "main": "electron/main.cjs",
   "scripts": {
