@@ -144,52 +144,6 @@ func main() {
 	eng.Start()
 	defer eng.Stop()
 
-	// FAZ 3.A — Canlı telemetri yayını (Go → Electron → useConnectionStore)
-	// DOWN/UP bayt akışı + protectedBytes + latency + uptime her saniye
-	var totalRxBytes, totalTxBytes int64
-	var lastRx, lastTx int64
-	var lastTelemetry = time.Now()
-	var startTime = time.Now()
-	go func() {
-		ticker := time.NewTicker(1000 * time.Millisecond)
-		defer ticker.Stop()
-		for range ticker.C {
-			now := time.Now()
-			elapsed := now.Sub(lastTelemetry).Seconds()
-			if elapsed <= 0 {
-				elapsed = 1
-			}
-			rxSpeed := float64(totalRxBytes-lastRx) / elapsed
-			txSpeed := float64(totalTxBytes-lastTx) / elapsed
-			lastRx = totalRxBytes
-			lastTx = totalTxBytes
-			lastTelemetry = now
-			uptime := int(now.Sub(startTime).Seconds())
-			// Gerçek trafik yoksa bile canlı görünüm için sentetik akış (dev / Idle)
-			if rxSpeed == 0 && txSpeed == 0 && totalRxBytes == 0 && totalTxBytes == 0 {
-				rxSpeed = 400000 + float64(now.UnixNano()%900000)
-				txSpeed = 80000 + float64(now.UnixNano()%200000)
-				totalRxBytes += int64(rxSpeed)
-				totalTxBytes += int64(txSpeed)
-				lastRx = totalRxBytes
-				lastTx = totalTxBytes
-			}
-			telemetry := map[string]interface{}{
-				"downloadSpeed": rxSpeed,
-				"uploadSpeed":   txSpeed,
-				"bytesReceived": totalRxBytes,
-				"bytesSent":     totalTxBytes,
-				"latencyMs":     22 + int(now.UnixNano()%18),
-				"uptimeSeconds": uptime,
-				"status":        "connected",
-				"protectedBytes": totalRxBytes + totalTxBytes,
-			}
-			if data, err := json.Marshal(telemetry); err == nil {
-				fmt.Printf("TELEMETRY:%s\n", string(data))
-			}
-		}
-	}()
-
 	// RPC handler for DPI techniques (from Electron main process)
 	go func() {
 		scanner := bufio.NewScanner(os.Stdin)
@@ -260,9 +214,6 @@ func main() {
 			recvCount++
 			if packet.IsOutbound() {
 				outCount++
-				totalTxBytes += int64(len(packet.Raw))
-			} else {
-				totalRxBytes += int64(len(packet.Raw))
 			}
 
 		if diagRadd < 3 {
