@@ -366,6 +366,20 @@ func main() {
 						k, st.Out, st.In, st.LastSeen.Format("15:04:05"))
 				}
 			}
+			// Bellek: 30s sessiz udp hedeflerini temizle (harita büyümesin)
+			for k, st := range udpDest {
+				if time.Since(st.LastSeen) > 30*time.Second {
+					delete(udpDest, k)
+				}
+			}
+			if len(udpDest) > 200 {
+				// en eskileri sil
+				type uKeyAge struct { k string; t time.Time }
+				allU := make([]uKeyAge, 0, len(udpDest))
+				for k, st := range udpDest { allU = append(allU, uKeyAge{k, st.LastSeen}) }
+				sort.Slice(allU, func(i, j int) bool { return allU[i].t.Before(allU[j].t) })
+				for i := 0; i < len(allU)-200; i++ { delete(udpDest, allU[i].k) }
+			}
 			// Sessizleşmiş (ölü) Roblox edge akışlarını bas: el sıkışma sonrası
 			// kaç bayt hareket etti — DPI kesintisinin kanıtı.
 			flushGameFlow(gameFlow, 12*time.Second)
@@ -464,7 +478,7 @@ func flushGameFlow(agg map[string]*GameFlowAgg, idle time.Duration) {
 			delete(agg, k)
 		}
 	}
-	if len(agg) > 300 {
+	if len(agg) > 100 {
 		type keyAge struct {
 			k string
 			t time.Time
@@ -474,7 +488,7 @@ func flushGameFlow(agg map[string]*GameFlowAgg, idle time.Duration) {
 			all = append(all, keyAge{k, f.Last})
 		}
 		sort.Slice(all, func(i, j int) bool { return all[i].t.Before(all[j].t) })
-		for i := 0; i < len(all)-300; i++ {
+		for i := 0; i < len(all)-100; i++ {
 			delete(agg, all[i].k)
 		}
 	}

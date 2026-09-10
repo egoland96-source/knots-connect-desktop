@@ -13,7 +13,7 @@ const safeNumFixed = (value: number | null | undefined, decimals: number = 1): s
   safeNum(value).toFixed(decimals);
 
 // History limit constant
-const HISTORY_LIMIT = 60;
+const HISTORY_LIMIT = 30;
 
 interface TelemetryData {
   downloadSpeed: number;

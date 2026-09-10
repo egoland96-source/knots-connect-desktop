@@ -4,7 +4,6 @@ import { Cpu } from 'lucide-react';
 import { useConnectionStore } from '../../store/connectionStore';
 import { useConnection } from '../../hooks/useConnection';
 import { AnnouncementsBanner } from '../../components/AnnouncementsBanner';
-import { MiniGlobe } from '../../components/MiniGlobe';
 import { DashboardShell } from './components/DashboardShell';
 import { Sidebar as DashboardSidebar } from './components/Sidebar';
 import { ConnectionOverview } from './components/ConnectionOverview';
@@ -14,14 +13,22 @@ import { AdvancedDpiDrawer } from './components/AdvancedDpiDrawer';
 import { ServerMap } from './components/ServerMap';
 import type { ConnectionSnapshot, ServerNode } from '../../types/connection';
 
-// Spec palette — Clean Trust + Kernel Character
-// bg #080D16, glass rgba(17,25,40,.68) blur 12px, active #34D399, accent #3B82F6->#6366F1, DPI #A78BFA
-
-// Only real servers (matches screenshots + purchased WG node elsewhere). Keep list minimal.
-const MAP_NODES: ServerNode[] = [
-  { id: 'nl', country: 'Netherlands', city: 'Amsterdam', code: 'NL', lat: 52.37, lon: 4.9, count: 3, ping: 12, load: 35 },
-  { id: 'de', country: 'Germany', city: 'Frankfurt', code: 'DE', lat: 50.11, lon: 8.68, count: 2, ping: 18, load: 42 },
-  { id: 'fi', country: 'Finland', city: 'Helsinki', code: 'FI', lat: 60.17, lon: 24.93, count: 2, ping: 36, load: 28 },
+// Spec palette — Clean Trust + Kernel Character
+
+// bg #080D16, glass rgba(17,25,40,.68) blur 12px, active #34D399, accent #3B82F6->#6366F1, DPI #A78BFA
+
+
+
+// Only real servers (matches screenshots + purchased WG node elsewhere). Keep list minimal.
+
+const MAP_NODES: ServerNode[] = [
+
+  { id: 'nl', country: 'Netherlands', city: 'Amsterdam', code: 'NL', lat: 52.37, lon: 4.9, count: 3, ping: 12, load: 35 },
+
+  { id: 'de', country: 'Germany', city: 'Frankfurt', code: 'DE', lat: 50.11, lon: 8.68, count: 2, ping: 18, load: 42 },
+
+  { id: 'fi', country: 'Finland', city: 'Helsinki', code: 'FI', lat: 60.17, lon: 24.93, count: 2, ping: 36, load: 28 },
+
 ];
 
 export const Dashboard: React.FC = () => {
@@ -33,39 +40,68 @@ export const Dashboard: React.FC = () => {
   const bytesSent = useConnectionStore((s) => s.bytesSent);
   const downloadSpeed = useConnectionStore((s) => s.downloadSpeed);
   const uploadSpeed = useConnectionStore((s) => s.uploadSpeed);
-  const encryptionMethod = useConnectionStore((s) => s.encryptionMethod);
-  // Live snapshot (Go IPC)
-  const liveIp = useConnectionStore((s) => s.ipAddress);
-  const liveLocation = useConnectionStore((s) => s.location);
-  const liveIsp = useConnectionStore((s) => s.isp);
-  // WireGuard — dedicated tunnel to purchased node (Secaucus)
-  const wgStatus = useConnectionStore((s) => s.wgStatus);
+  const encryptionMethod = useConnectionStore((s) => s.encryptionMethod);
+
+  // Live snapshot (Go IPC)
+
+  const liveIp = useConnectionStore((s) => s.ipAddress);
+
+  const liveLocation = useConnectionStore((s) => s.location);
+
+  const liveIsp = useConnectionStore((s) => s.isp);
+
+  // WireGuard — dedicated tunnel to purchased node (Secaucus)
+
+  const wgStatus = useConnectionStore((s) => s.wgStatus);
+
   const wgBusy = useConnectionStore((s) => s.wgBusy);
 
   const { toggleConnection } = useConnection();
 
-  // Poll WireGuard status on mount + every 5s — keep Dashboard in sync with real tunnel
-  useEffect(() => {
-    let alive = true;
-    const refresh = async () => {
-      if (alive) await useConnectionStore.getState().refreshWgStatus();
-    };
-    void refresh();
-    const id = setInterval(refresh, 5000);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
-  }, []);
-
-  // Hybrid & Privacy -> WireGuard active -> considered VPN mode
-  const isVpnMode = operatingMode === 'hybrid' || operatingMode === 'privacy';
-  const isConnected = isVpnMode ? !!wgStatus?.running : status === 'connected';
-  const isConnecting = isVpnMode ? wgBusy : status === 'connecting' || (status as string) === 'disconnecting';
-
-  // Purchased WireGuard node — Secaucus, NJ, USA
-  const WG_SERVER = { id: 'wg-us', country: 'United States', city: 'Secaucus', code: 'US', lat: 40.7862, lon: -74.0743, count: 1, ping: 60, load: 30 };
-  const MAP_NODES_ALL: ServerNode[] = [WG_SERVER, ...MAP_NODES];
+  // Poll WireGuard status on mount + every 5s — keep Dashboard in sync with real tunnel
+
+  useEffect(() => {
+
+    let alive = true;
+
+    const refresh = async () => {
+
+      if (alive) await useConnectionStore.getState().refreshWgStatus();
+
+    };
+
+    void refresh();
+
+    const id = setInterval(refresh, 5000);
+
+    return () => {
+
+      alive = false;
+
+      clearInterval(id);
+
+    };
+
+  }, []);
+
+
+
+  // Hybrid & Privacy -> WireGuard active -> considered VPN mode
+
+  const isVpnMode = operatingMode === 'hybrid' || operatingMode === 'privacy';
+
+  const isConnected = isVpnMode ? !!wgStatus?.running : status === 'connected';
+
+  const isConnecting = isVpnMode ? wgBusy : status === 'connecting' || (status as string) === 'disconnecting';
+
+
+
+  // Purchased WireGuard node — Secaucus, NJ, USA
+
+  const WG_SERVER = { id: 'wg-us', country: 'United States', city: 'Secaucus', code: 'US', lat: 40.7862, lon: -74.0743, count: 1, ping: 60, load: 30 };
+
+  const MAP_NODES_ALL: ServerNode[] = [WG_SERVER, ...MAP_NODES];
+
   const wgActiveId = isVpnMode && isConnected ? 'wg-us' : null;
 
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -88,15 +124,24 @@ export const Dashboard: React.FC = () => {
     };
   }, []);
 
-  // Live snapshot when connected, otherwise real geo via ipapi
-  const displayIp = isConnected
-    ? (isVpnMode ? (wgStatus?.running ? '162.35.122.121' : (liveIp ?? '185.24.10.4')) : (liveIp ?? '185.24.10.4'))
-    : realGeo?.ip ?? '176.88.147.242';
-  const displayCountry = isConnected
-    ? (isVpnMode ? 'United States' : (liveLocation?.country ?? 'Netherlands'))
-    : realGeo?.country ?? 'Turkey';
-  const displayProvider = isConnected
-    ? (isVpnMode ? 'Interserver, Inc' : (liveIsp ?? 'Knots Secure'))
+  // Live snapshot when connected, otherwise real geo via ipapi
+
+  const displayIp = isConnected
+
+    ? (isVpnMode ? (wgStatus?.running ? '162.35.122.121' : (liveIp ?? '185.24.10.4')) : (liveIp ?? '185.24.10.4'))
+
+    : realGeo?.ip ?? '176.88.147.242';
+
+  const displayCountry = isConnected
+
+    ? (isVpnMode ? 'United States' : (liveLocation?.country ?? 'Netherlands'))
+
+    : realGeo?.country ?? 'Turkey';
+
+  const displayProvider = isConnected
+
+    ? (isVpnMode ? 'Interserver, Inc' : (liveIsp ?? 'Knots Secure'))
+
     : realGeo?.org ?? 'Turkcell Superonline';
 
   const selectedNode = useMemo(() => (MAP_NODES_ALL.find((n) => n.id === selectedNodeId) ?? null), [selectedNodeId]);
@@ -106,36 +151,66 @@ export const Dashboard: React.FC = () => {
   }, [selectedNodeId, wgActiveId]);
   const mapConnection = isConnected && activeMapNode ? { fromLat: 39.0, fromLon: 35.0, toLat: activeMapNode.lat, toLon: activeMapNode.lon } : null;
 
-  // Snapshot for ConnectionOverview — driven by real WireGuard / Go state
-  const snapshot: ConnectionSnapshot = useMemo(() => {
-    const state = (isVpnMode
-      ? (wgStatus?.running ? 'connected' : wgBusy ? 'connecting' : (status as string) === 'disconnecting' ? 'disconnecting' : status === 'connected' ? 'connected' : 'disconnected')
-      : (status === 'connecting' ? 'connecting' : status === 'connected' ? 'connected' : (status as string) === 'disconnecting' ? 'disconnecting' : status === 'error' ? 'error' : 'disconnected')) as ConnectionSnapshot['state'];
-
-    let server: ConnectionSnapshot['server'] = null;
-    let ip: string | null = null;
-    if (state === 'connected') {
-      if (isVpnMode) {
-        server = { country: 'United States', city: 'Secaucus', code: 'US' };
-        ip = '162.35.122.121';
-      } else {
-        const liveServer = liveLocation ? { country: liveLocation.country, city: liveLocation.city ?? '', code: liveLocation.code } : null;
-        server = selectedNode ? { country: selectedNode.country, city: selectedNode.city ?? '', code: selectedNode.code } : (liveServer ?? { country: 'Netherlands', city: 'Amsterdam', code: 'NL' });
-        ip = liveIp ?? displayIp;
-      }
-    }
-
-    return {
-      state,
-      server,
-      latencyMs: latencyMs || null,
-      ipAddress: ip ?? displayIp,
-      protectedBytes: (bytesReceived || 0) + (bytesSent || 0),
-      uploadBytesPerSecond: uploadSpeed || 0,
-      downloadBytesPerSecond: downloadSpeed || 0,
-    };
-  }, [isVpnMode, wgStatus?.running, wgBusy, status, selectedNode, latencyMs, displayIp, liveIp, liveLocation, bytesReceived, bytesSent, uploadSpeed, downloadSpeed]);
-
+  // Snapshot for ConnectionOverview — driven by real WireGuard / Go state
+
+  const snapshot: ConnectionSnapshot = useMemo(() => {
+
+    const state = (isVpnMode
+
+      ? (wgStatus?.running ? 'connected' : wgBusy ? 'connecting' : (status as string) === 'disconnecting' ? 'disconnecting' : status === 'connected' ? 'connected' : 'disconnected')
+
+      : (status === 'connecting' ? 'connecting' : status === 'connected' ? 'connected' : (status as string) === 'disconnecting' ? 'disconnecting' : status === 'error' ? 'error' : 'disconnected')) as ConnectionSnapshot['state'];
+
+
+
+    let server: ConnectionSnapshot['server'] = null;
+
+    let ip: string | null = null;
+
+    if (state === 'connected') {
+
+      if (isVpnMode) {
+
+        server = { country: 'United States', city: 'Secaucus', code: 'US' };
+
+        ip = '162.35.122.121';
+
+      } else {
+
+        const liveServer = liveLocation ? { country: liveLocation.country, city: liveLocation.city ?? '', code: liveLocation.code } : null;
+
+        server = selectedNode ? { country: selectedNode.country, city: selectedNode.city ?? '', code: selectedNode.code } : (liveServer ?? { country: 'Netherlands', city: 'Amsterdam', code: 'NL' });
+
+        ip = liveIp ?? displayIp;
+
+      }
+
+    }
+
+
+
+    return {
+
+      state,
+
+      server,
+
+      latencyMs: latencyMs || null,
+
+      ipAddress: ip ?? displayIp,
+
+      protectedBytes: (bytesReceived || 0) + (bytesSent || 0),
+
+      uploadBytesPerSecond: uploadSpeed || 0,
+
+      downloadBytesPerSecond: downloadSpeed || 0,
+
+    };
+
+  }, [isVpnMode, wgStatus?.running, wgBusy, status, selectedNode, latencyMs, displayIp, liveIp, liveLocation, bytesReceived, bytesSent, uploadSpeed, downloadSpeed]);
+
+
+
   const protocolLabel = useMemo(() => {
     if (operatingMode === 'privacy') return 'WireGuard VPN';
     if (operatingMode === 'hybrid') return 'Smart Hybrid \u00B7 WireGuard + DPI';
@@ -178,10 +253,14 @@ export const Dashboard: React.FC = () => {
             isToggling={isConnecting}
           />
 
-          <ModeSwitcher mode={operatingMode} onChange={handleModeSwitch} onOpenAdvanced={() => setDrawerOpen(true)} dpiActive={operatingMode !== 'privacy'} />
-
-          {/* Map — overview & network show map; identity is placeholder */}
-          {activeMenu !== 'identity' ? (
+          <ModeSwitcher mode={operatingMode} onChange={handleModeSwitch} onOpenAdvanced={() => setDrawerOpen(true)} dpiActive={operatingMode !== 'privacy'} />
+
+
+
+          {/* Map — overview & network show map; identity is placeholder */}
+
+          {activeMenu !== 'identity' ? (
+
             <ServerMap
               nodes={MAP_NODES_ALL}
               activeId={selectedNodeId ?? wgActiveId}
@@ -193,23 +272,40 @@ export const Dashboard: React.FC = () => {
               connectLabel={isVpnMode ? 'Connect via WireGuard' : 'Connect via DPI'}
               connection={mapConnection}
             />
-          ) : (
-            <div
-              style={{
-                padding: 18,
-                borderRadius: 18,
-                background: 'rgba(17,25,40,0.68)',
-                backdropFilter: 'blur(12px)',
-                WebkitBackdropFilter: 'blur(12px)',
-                border: '1px solid rgba(255,255,255,0.07)',
-                boxShadow: '0 10px 30px rgba(0,0,0,0.32)',
-              }}
-            >
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#F8FAFC' }}>Identity</div>
-              <div style={{ fontSize: 12.5, color: '#94A3B8', marginTop: 6 }}>Your Knots ID and recovery key are stored on this device. Back up in Settings → Account.</div>
-            </div>
-          )}
-
+          ) : (
+
+            <div
+
+              style={{
+
+                padding: 18,
+
+                borderRadius: 18,
+
+                background: 'rgba(17,25,40,0.68)',
+
+                backdropFilter: 'blur(12px)',
+
+                WebkitBackdropFilter: 'blur(12px)',
+
+                border: '1px solid rgba(255,255,255,0.07)',
+
+                boxShadow: '0 10px 30px rgba(0,0,0,0.32)',
+
+              }}
+
+            >
+
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#F8FAFC' }}>Identity</div>
+
+              <div style={{ fontSize: 12.5, color: '#94A3B8', marginTop: 6 }}>Your Knots ID and recovery key are stored on this device. Back up in Settings → Account.</div>
+
+            </div>
+
+          )}
+
+
+
           {/* Engine Status — real (no hardcode), kept subtle — Clean Trust */}
           <div
             style={{
@@ -334,11 +430,7 @@ export const Dashboard: React.FC = () => {
               {isConnected ? 'TUNNEL ENCRYPTED' : 'NOT PROTECTED'}
             </div>
           </motion.div>
-
-          {/* Mini globe kept as delightful detail â€” bottom-right of page, not inside map card */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <MiniGlobe lat={defaultLat} lon={defaultLon} markerLat={defaultLat} markerLon={defaultLon} size={64} />
-          </div>
+          {/* Mini globe removed for memory save — 1.3.2 lightweight */}
         </div>
       </div>
 
@@ -348,4 +440,5 @@ export const Dashboard: React.FC = () => {
 };
 
 export default Dashboard;
-
+
+

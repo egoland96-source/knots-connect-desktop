@@ -14,13 +14,14 @@ export const useConnection = () => {
   const status = useConnectionStore((state) => state.status);
   const errorMessage = useConnectionStore((state) => state.errorMessage);
   const engineMode = useConnectionStore((state) => state.engineMode);
+  const operatingMode = useConnectionStore((state) => state.operatingMode);
   const wgStatus = useConnectionStore((state) => state.wgStatus);
   const wgBusy = useConnectionStore((state) => state.wgBusy);
   const storeConnect = useConnectionStore((state) => state.connect);
   const storeDisconnect = useConnectionStore((state) => state.disconnect);
   const setWireGuard = useConnectionStore((state) => state.setWireGuard);
 
-  const isVpnMode = engineMode !== 'go';
+  const isVpnMode = operatingMode === 'hybrid' || operatingMode === 'privacy';
   // VPN modunda bağlılık WireGuard'ın gerçek durumundan gelir.
   const isConnected = isVpnMode ? !!wgStatus?.running : status === 'connected';
 
