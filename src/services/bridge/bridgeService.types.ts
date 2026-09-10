@@ -24,3 +24,35 @@ export interface EngineStatus {
   packetsReceived: number | null;
   packetsSent: number | null;
 }
+
+export type OperatingMode = 'gaming' | 'hybrid' | 'privacy';
+
+export interface SplitPresets {
+  steam: boolean;
+  riot: boolean;
+  epic: boolean;
+  roblox: boolean;
+  discordVoice: boolean;
+}
+
+export interface SplitTunnelingConfig {
+  enabled: boolean;
+  autoDetectGames: boolean;
+  presets: SplitPresets;
+  customApps: string[];
+  customIps: { ip: string; mask?: string; name?: string }[];
+}
+
+export interface SplitStatus {
+  splitTunneling: SplitTunnelingConfig;
+  operatingMode: OperatingMode;
+  activeRoutesCount: number;
+  physicalGateway: string;
+}
+
+export interface RunningProcessItem {
+  name: string;
+  pid: number;
+  title: string;
+  isGame: boolean;
+}

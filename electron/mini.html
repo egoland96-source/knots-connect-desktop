@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><style>
+  html,body{margin:0;padding:0;width:64px;height:64px;overflow:hidden;background:transparent;font-family:'Inter',system-ui,sans-serif;-webkit-user-select:none;user-select:none}
+  .k{position:fixed;left:0;top:0;width:64px;height:64px;border-radius:14px;background:rgba(15,18,28,.92);box-shadow:0 8px 28px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform .15s ease;border:1px solid rgba(255,255,255,.08);touch-action:none}
+  .k:hover{transform:scale(1.06)}
+  .k:active{transform:scale(.94)}
+  .k.dragging{cursor:grabbing;transition:none;transform:scale(1.05);box-shadow:0 12px 36px rgba(99,102,241,.55),inset 0 1px 0 rgba(255,255,255,.18)}
+  .k img{width:46px;height:46px;border-radius:8px;display:block;pointer-events:none}
+  .dot{position:absolute;top:-1px;right:-1px;width:13px;height:13px;border-radius:50%;background:#34D399;box-shadow:0 0 8px #34D399;border:2px solid rgba(15,18,28,.95)}
+  .dot.off{background:#7C8CA3;box-shadow:none}
+  .tip{position:absolute;left:72px;top:18px;font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(15,18,28,.85);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);padding:5px 9px;border-radius:6px;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .15s}
+  .wrap:hover .tip{opacity:1}
+  .k{animation:pulse 2.2s ease-in-out infinite}
+  @keyframes pulse{0%,100%{box-shadow:0 8px 28px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.12)}50%{box-shadow:0 8px 36px rgba(99,102,241,.45),inset 0 1px 0 rgba(255,255,255,.12)}}
+</style></head><body>
+  <div class="wrap" style="position:fixed;left:0;top:0;width:64px;height:64px">
+    <div class="k" id="k" title="KNOTS — sürükle | tıkla aç">
+      <img src="mini-icon.png" alt="KNOTS" draggable="false" />
+      <span class="dot" id="dot"></span>
+    </div>
+    <div class="tip">Sürükle · tıkla aç</div>
+  </div>
+  <script>
+    // OS native drag yerine JS ile sürükleme: mousedown hareketi
+    // 3px'i aştığında → drag, mouseup'ta main process'e setBounds IPC.
+    // 3px altında + 350ms altı → tıklama → exit.
+    const k = document.getElementById('k');
+    let dragging = false, downX = 0, downY = 0, lastX = 0, lastY = 0, downTs = 0;
+    k.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      downX = lastX = e.screenX;
+      downY = lastY = e.screenY;
+      downTs = Date.now();
+      dragging = false;
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (downTs === 0) return;
+      if (!dragging) {
+        if (Math.abs(e.screenX - downX) > 3 || Math.abs(e.screenY - downY) > 3) {
+          dragging = true;
+          k.classList.add('dragging');
+        }
+      } else {
+        const dx = e.screenX - lastX, dy = e.screenY - lastY;
+        if (dx !== 0 || dy !== 0) {
+          lastX = e.screenX; lastY = e.screenY;
+          window.knotsMini.dragMove(dx, dy);
+        }
+      }
+    });
+    window.addEventListener('mouseup', (e) => {
+      if (downTs === 0) return;
+      const dt = Date.now() - downTs;
+      const moved = Math.abs(e.screenX - downX) > 3 || Math.abs(e.screenY - downY) > 3;
+      downTs = 0;
+      k.classList.remove('dragging');
+      dragging = false;
+      if (!moved && dt < 400) {
+        window.knotsMini.exit();
+      }
+    });
+    k.addEventListener('contextmenu', (e) => { e.preventDefault(); window.knotsMini.exit(); });
+  </script>
+</body></html>
+

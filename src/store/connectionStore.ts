@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { shallow } from 'zustand/shallow';
 import { bridgeService } from '../services/bridge/bridgeService';
-import type { ConnectionState, EngineMode } from '../services/bridge/bridgeService.types';
+import type { ConnectionState, EngineMode, OperatingMode, SplitStatus, SplitTunnelingConfig } from '../services/bridge/bridgeService.types';
 
 // =========================================================================
 // UTILITY: Safe number handling
@@ -36,6 +36,16 @@ interface TelemetryData {
   ipAddress?: string | null;
   location?: { country: string; city: string; code: string } | null;
   isp?: string | null;
+}
+
+// WireGuard durumu — Knots'un kendi sunucusuna tam tünel
+export interface WireGuardStatus {
+  running: boolean;
+  installed: boolean;
+  state: string | null;
+  server: string | null;
+  handshakeSec: number | null;
+  transfers: { rxBytes: number; txBytes: number } | null;
 }
 
 interface ConnectionStoreState {
@@ -81,7 +91,16 @@ interface ConnectionStoreState {
     autoUpdate: boolean;
     aggressiveMode: boolean;
     adblock: boolean;
+    wireguardEnabled: boolean;
   };
+
+  // WireGuard
+  wgStatus: WireGuardStatus | null;
+  wgBusy: boolean;
+
+  // Smart Split Tunneling & Operating Modes
+  operatingMode: OperatingMode;
+  splitSettings: SplitStatus | null;
 
   // Actions
   connect: (serverId?: string) => Promise<void>;
@@ -91,6 +110,13 @@ interface ConnectionStoreState {
   setEncryptionMethod: (methodId: number) => Promise<void>;
   toggleSetting: (key: keyof ConnectionStoreState['settings']) => Promise<void>;
   loadInitialSettings: () => Promise<void>;
+  refreshWgStatus: () => Promise<void>;
+  setWireGuard: (enabled: boolean) => Promise<void>;
+  setOperatingMode: (mode: OperatingMode) => Promise<void>;
+  loadSplitSettings: () => Promise<void>;
+  updateSplitSettings: (settings: Partial<SplitTunnelingConfig>) => Promise<void>;
+  addBypassApp: (app: string) => Promise<void>;
+  removeBypassApp: (app: string) => Promise<void>;
   
   // Single global telemetry listener
   initTelemetryListener: () => () => void;
@@ -139,7 +165,13 @@ export const useConnectionStore = create<ConnectionStoreState>()((set, get) => (
     autoUpdate: true,
     aggressiveMode: false,
     adblock: true,
+    wireguardEnabled: false,
   },
+
+  wgStatus: null,
+  wgBusy: false,
+  operatingMode: 'hybrid',
+  splitSettings: null,
 
   connect: async (serverId) => {
     set({ status: 'connecting', errorMessage: null });
@@ -273,8 +305,131 @@ export const useConnectionStore = create<ConnectionStoreState>()((set, get) => (
       if (currentMethod) {
         set({ encryptionMethod: currentMethod });
       }
+
+      // Split Tunneling & Operating Mode yükle
+      await get().loadSplitSettings();
+
+      // WireGuard durumunu da yükle (toggle durumu eşleşsin)
+      if (typeof window !== 'undefined' && window.knots?.wgStatus) {
+        try {
+          const wg = await window.knots.wgStatus();
+          set({ wgStatus: wg, settings: { ...get().settings, wireguardEnabled: !!wg.running } });
+        } catch {}
+      }
+
+      // Mini moddan çıkışta motor hâlâ bağlıysa UI'ı senkronla
+      if (typeof bridgeService.getStatus === 'function') {
+        const current = await bridgeService.getStatus();
+        if (current) {
+          set({
+            status: current.state,
+            serverId: current.serverId,
+            engineMode: current.engineMode,
+            uptimeSeconds: current.uptimeSeconds,
+            bypassCount: current.bypassCount,
+            latencyMs: safeNum(current.latencyMs),
+          });
+        }
+      }
     } catch (error) {
       console.error("Başlangıç ayarları ve motor durumu yüklenemedi:", error);
+    }
+  },
+
+  // WireGuard — sunucuya tam tünel aç/kapat + durum
+  refreshWgStatus: async () => {
+    try {
+      if (typeof window !== 'undefined' && window.knots?.wgStatus) {
+        const st = await window.knots.wgStatus();
+        set({ wgStatus: st });
+      }
+    } catch (error) {
+      console.error('WireGuard durumu yüklenemedi:', error);
+    }
+  },
+
+  setWireGuard: async (enabled) => {
+    set({ wgBusy: true });
+    try {
+      if (typeof window !== 'undefined' && window.knots?.wgEnable) {
+        const res = await window.knots.wgEnable(enabled);
+        if (!res?.success) {
+          console.warn('WireGuard değişikliği başarısız:', res?.message);
+          // Ayar tutarlılığı için önceki durumu geri yükle
+          const stOld = get().wgStatus;
+          set({ settings: { ...get().settings, wireguardEnabled: !!stOld?.running } });
+        } else {
+          set((s) => ({ settings: { ...s.settings, wireguardEnabled: enabled } }));
+        }
+      }
+      await get().refreshWgStatus();
+    } catch (error) {
+      console.error('WireGuard değiştirilirken hata:', error);
+    } finally {
+      set({ wgBusy: false });
+    }
+  },
+
+  // Smart Split Tunneling & Operating Modes
+  setOperatingMode: async (mode: OperatingMode) => {
+    try {
+      set({ operatingMode: mode });
+      if (typeof bridgeService.setOperatingMode === 'function') {
+        await bridgeService.setOperatingMode(mode);
+      }
+      await get().refreshWgStatus();
+      await get().loadSplitSettings();
+    } catch (err) {
+      console.error('Operating mode error:', err);
+    }
+  },
+
+  loadSplitSettings: async () => {
+    try {
+      if (typeof bridgeService.getSplitSettings === 'function') {
+        const split = await bridgeService.getSplitSettings();
+        if (split) {
+          set({
+            splitSettings: split,
+            operatingMode: split.operatingMode || get().operatingMode,
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Split settings load error:', err);
+    }
+  },
+
+  updateSplitSettings: async (settings: Partial<SplitTunnelingConfig>) => {
+    try {
+      if (typeof bridgeService.updateSplitSettings === 'function') {
+        await bridgeService.updateSplitSettings(settings);
+      }
+      await get().loadSplitSettings();
+    } catch (err) {
+      console.error('Update split settings error:', err);
+    }
+  },
+
+  addBypassApp: async (app: string) => {
+    try {
+      if (typeof bridgeService.addBypassApp === 'function') {
+        await bridgeService.addBypassApp(app);
+      }
+      await get().loadSplitSettings();
+    } catch (err) {
+      console.error('Add bypass app error:', err);
+    }
+  },
+
+  removeBypassApp: async (app: string) => {
+    try {
+      if (typeof bridgeService.removeBypassApp === 'function') {
+        await bridgeService.removeBypassApp(app);
+      }
+      await get().loadSplitSettings();
+    } catch (err) {
+      console.error('Remove bypass app error:', err);
     }
   },
 
@@ -354,7 +509,16 @@ export const useConnectionStore = create<ConnectionStoreState>()((set, get) => (
         // Payload from Go engine via Electron IPC
         get()._handleTelemetry(payload);
       });
-      return unsubscribe;
+      let wgUnsub = () => {};
+      if (typeof window.knots.onWgState === 'function') {
+        wgUnsub = window.knots.onWgState((payload) => {
+          set({ wgStatus: payload, settings: { ...get().settings, wireguardEnabled: !!payload?.running } });
+        });
+      }
+      return () => {
+        unsubscribe();
+        wgUnsub();
+      };
     } 
     else if (typeof bridgeService.onTelemetry === 'function') {
       const unsubscribe = bridgeService.onTelemetry((payload) => {

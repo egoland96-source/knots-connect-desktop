@@ -1,7 +1,7 @@
 import React, { useCallback, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useConnectionStore } from '../../store/connectionStore';
-import { Minus, Square, X, MapPin, Bell, Settings } from 'lucide-react';
+import { Minus, Square, X, MapPin, Bell, Settings, Box } from 'lucide-react';
 
 const SERVERS: { id: string; name: string }[] = [
   { id: 'nl', name: 'Netherlands · Amsterdam' },
@@ -48,7 +48,11 @@ export const TopBar = React.memo(() => {
 
   const handleMinimize = useCallback(() => window.windowControls.minimize(), []);
   const handleMaximize = useCallback(() => window.windowControls.maximize(), []);
-  const handleClose = useCallback(() => window.windowControls.close(), []);
+  const handleClose = useCallback(() => {
+    // Varsayılan davranış: pencereyi gizle, arka planda çalışmaya devam et (system tray)
+    window.windowControls?.hideToTray?.();
+  }, []);
+  const handleEnterMini = useCallback(() => window.windowControls?.enterMini?.(), []);
 
   const isConnected = status === 'connected';
   const statusLabel = isConnected ? 'Connected' : status === 'connecting' ? 'Connecting…' : 'Disconnected';
@@ -213,6 +217,27 @@ export const TopBar = React.memo(() => {
         <LiveClock />
 
         <div className="app-region-no-drag" style={{ display: 'flex', gap: 4 }}>
+          <button
+            onClick={handleEnterMini}
+            aria-label="Mini Mode"
+            style={{
+              width: 30,
+              height: 30,
+              borderRadius: 8,
+              border: 'none',
+              background: 'transparent',
+              color: 'var(--text-muted)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              transition: 'background 150ms var(--ease), color 150ms var(--ease)',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; e.currentTarget.style.color = 'var(--text-primary)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+          >
+            <Box size={13} strokeWidth={2} />
+          </button>
           <button
             onClick={handleMinimize}
             aria-label="Minimize"

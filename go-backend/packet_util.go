@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math/rand"
 	"strconv"
 	"time"
@@ -110,21 +111,78 @@ func buildTCPFragment(original []byte, ipHdrLen, tcpHdrLen int, payload []byte, 
 	return buf
 }
 
-// tcpPayload — IPv4+TCP paketinden IHL, TCP header uzunluğu ve payload'ı ayıklar.
+// tcpPayload — IPv4+IPv6 TCP paketinden IP header uzunluğu, TCP header
+// uzunluğu ve payload'ı ayıklar. IPv6 için extension header'ları skip eder.
 // Geçersizse ok=false döner.
 func tcpPayload(raw []byte) (ipHdrLen, tcpHdrLen int, payload []byte, ok bool) {
-	if len(raw) < 20 || raw[0]>>4 != 4 || raw[9] != 6 {
+	if len(raw) < 20 {
 		return 0, 0, nil, false
 	}
-	ihl := int(raw[0]&0x0F) * 4
-	if ihl < 20 || len(raw) < ihl+8 {
+	ver := raw[0] >> 4
+	if ver != 4 && ver != 6 {
 		return 0, 0, nil, false
 	}
-	thl := int((raw[ihl+12]>>4)&0x0F) * 4
-	if thl < 20 || len(raw) < ihl+thl {
+	hdrLen, next, err := ipv6SkipExtHeaders(ver, raw, 6)
+	if err != nil || hdrLen < 20 {
 		return 0, 0, nil, false
 	}
-	return ihl, thl, raw[ihl+thl:], true
+	if next != 6 {
+		return 0, 0, nil, false
+	}
+	if len(raw) < hdrLen+20 {
+		return 0, 0, nil, false
+	}
+	thl := int((raw[hdrLen+12]>>4)&0x0F) * 4
+	if thl < 20 || len(raw) < hdrLen+thl {
+		return 0, 0, nil, false
+	}
+	return hdrLen, thl, raw[hdrLen+thl:], true
+}
+
+// ipv6SkipExtHeaders — verilen IP paketinde next header TCP olana kadar
+// extension header'ları atlar. IPv4'te sadece IHL döner. IPv6'da hop-by-hop,
+// routing, fragment, destination zincirini takip eder. nextHdr beklenen (6=TCP,
+// 17=UDP) ile eşleşmezse hata döner.
+func ipv6SkipExtHeaders(ver byte, raw []byte, wantNext byte) (hdrLen int, nextHdr byte, err error) {
+	if ver == 4 {
+		ihl := int(raw[0]&0x0F) * 4
+		if ihl < 20 {
+			return 0, 0, fmt.Errorf("ipv4 ihl too small")
+		}
+		return ihl, raw[9], nil
+	}
+	if ver != 6 {
+		return 0, 0, fmt.Errorf("unknown ip version")
+	}
+	if len(raw) < 40 {
+		return 0, 0, fmt.Errorf("ipv6 header too short")
+	}
+	off := 40
+	next := raw[6]
+	for {
+		if next == wantNext {
+			return off, next, nil
+		}
+		if next == 59 || next == 0 { // no-next-header / hop-by-hop pad
+			return 0, 0, fmt.Errorf("ipv6 ext chain ended without tcp/udp")
+		}
+		// 44, 50, 51 (fragment), 60 (destination) — 8-byte header + length
+		if next != 44 && next != 50 && next != 51 && next != 60 {
+			return 0, 0, fmt.Errorf("ipv6 unexpected next=%d", next)
+		}
+		if off+8 > len(raw) {
+			return 0, 0, fmt.Errorf("ipv6 ext header truncated")
+		}
+		hdrExtLen := int(raw[off+1])
+		if hdrExtLen == 0 {
+			return 0, 0, fmt.Errorf("ipv6 ext len 0")
+		}
+		next = raw[off]
+		off += hdrExtLen
+		if off > len(raw) {
+			return 0, 0, fmt.Errorf("ipv6 ext overflow")
+		}
+	}
 }
 
 // windowMinTransform — SYN paketinin TCP Window'unu 16'ya çeker.

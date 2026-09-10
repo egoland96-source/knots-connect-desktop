@@ -55,12 +55,25 @@ func (s *SplitVStrategy) Metadata() engine.StrategyMeta {
 // Apply — IPv4 TCP/443 ClientHello + (force veya blacklist match) → SNI
 // hostname bölgesinden çoklu parçaya böl. Uygun değilse (handled=false)
 // döner, paket passthrough edilir.
+// IPv6 non-breaking: payload 40+byte sabit header + extension header skip, SNI split edilir
 func (s *SplitVStrategy) Apply(raw, addr []byte, send engine.SendFunc) (bool, error) {
-	if len(raw) < 20 || raw[0]>>4 != 4 || raw[9] != 6 {
+	if len(raw) < 20 {
 		return false, nil
 	}
-	ipHdrLen := int(raw[0]&0x0F) * 4
-	if ipHdrLen < 20 || len(raw) < ipHdrLen+8 {
+	ver := raw[0] >> 4
+	if ver != 4 && ver != 6 {
+		return false, nil
+	}
+	// TCP protokolü IPv4'te byte 9, IPv6'da byte 6 (veya extension zinciri).
+	// raw[6]==6 IPv4'te flags/frag alanıdır; ipv6SkipExtHeaders nextHdr'ı verir.
+	ipHdrLen, nextHdr, err := ipv6SkipExtHeaders(ver, raw, 6)
+	if err != nil || ipHdrLen < 20 {
+		return false, nil
+	}
+	if nextHdr != 6 {
+		return false, nil
+	}
+	if len(raw) < ipHdrLen+20 {
 		return false, nil
 	}
 	tcpHdrLen := int((raw[ipHdrLen+12]>>4)&0x0F) * 4
@@ -79,6 +92,20 @@ func (s *SplitVStrategy) Apply(raw, addr []byte, send engine.SendFunc) (bool, er
 	sni := ExtractSNI(payload)
 	if sni == "" {
 		return false, nil
+	}
+	// Discord/Cloudflare edge'i parçalanmış ClientHello'yu reddediyor. Discord
+	// SNI'leri için TCP-parçalamadan kaçınıp paketi IP KATMANINDA böleriz:
+	// TCP segmenti bozulmaz → Cloudflare kabul eder; SNI ikinci IP fragmanında
+	// kaldığı için DPI reassembly yapmıyorsa hostname'i hiç göremez.
+	// force/blacklist koşullarından bağımsızdır: her durumda Discord → IP frag.
+	if IsDiscordDomain(sni) {
+		if ver != 4 {
+			// IPv4 fragment builder; IPv6'yı bozmamak için dokunma.
+			return false, nil
+		}
+		fmt.Fprintf(os.Stderr, "[go-engine] discord (%s) -> IP-frag (fake_ttl DPI'da RST yedi; fragment ediliyor)\n", sni)
+		sendDiscordIPFrag(raw, addr, ipHdrLen, tcpHdrLen, send)
+		return true, nil
 	}
 	// Ad-block check: If SNI is an ad/tracker, DROP instead of bypassing
 	// This prevents the engine from "rescuing" ad domains and causing 11% ad-block score

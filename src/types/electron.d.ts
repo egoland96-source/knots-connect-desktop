@@ -84,8 +84,38 @@ export interface KnotsBridgeApi {
 
   // === CANLI AKIŞ VE DİNLENME KANALLARI ===
   onTelemetry: (callback: (data: TelemetryPayload) => void) => () => void;
+  onSystemAlert?: (callback: (info: { title: string; body: string; ts?: number }) => void) => () => void;
+  onMiniMode?: (callback: (m: { active: boolean }) => void) => () => void;
+  miniStatus?: () => Promise<{ active: boolean }>;
   getSettings?: () => Promise<Record<string, any> | null>;
   updateSetting?: (key: string, value: any) => Promise<void>;
+
+  // === WIREGUARD VPN (sunucuya tam tünel) ===
+  wgStatus?: () => Promise<{
+    running: boolean;
+    installed: boolean;
+    state: string | null;
+    server: string | null;
+    handshakeSec: number | null;
+    transfers: { rxBytes: number; txBytes: number } | null;
+  }>;
+  wgEnable?: (enabled: boolean) => Promise<{ success: boolean; message?: string }>;
+  onWgState?: (callback: (data: {
+    running: boolean;
+    installed: boolean;
+    state: string | null;
+    server: string | null;
+    handshakeSec: number | null;
+    transfers: { rxBytes: number; txBytes: number } | null;
+  }) => void) => () => void;
+
+  // === SMART SPLIT TUNNELING & OPERATING MODES ===
+  getSplitSettings?: () => Promise<any>;
+  updateSplitSettings?: (settings: any) => Promise<any>;
+  setOperatingMode?: (mode: string) => Promise<any>;
+  getRunningProcesses?: () => Promise<any[]>;
+  addBypassApp?: (appName: string) => Promise<any>;
+  removeBypassApp?: (appName: string) => Promise<any>;
 
   // === PRIVACY PROTECTION ===
   privacy?: PrivacyBridgeApi;
@@ -94,6 +124,7 @@ export interface KnotsBridgeApi {
   onUpdateStatus?: (callback: (info: { status: 'downloading' | 'ready' | 'error'; version: string; detail?: string }) => void) => () => void;
   openReleases?: () => void;
   installUpdate?: () => Promise<void>;
+  rollbackUpdate?: () => Promise<void>;
   toggleDevTools?: () => Promise<void>;
   openLogs?: () => Promise<void>;
 }
@@ -102,6 +133,10 @@ export interface WindowControlsApi {
   minimize: () => Promise<void>;
   maximize: () => Promise<void>;
   close: () => Promise<void>;
+  enterMini?: () => Promise<void>;
+  exitMini?: () => Promise<void>;
+  hideToTray?: () => Promise<void>;
+  showFromTray?: () => Promise<void>;
 }
 
 declare global {

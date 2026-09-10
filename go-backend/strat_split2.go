@@ -59,30 +59,19 @@ func (s *Split2Strategy) Metadata() engine.StrategyMeta {
 	}
 }
 
-// Apply — orijinal recovery davranışı: IPv4 TCP/443 ClientHello + SNI
+// Apply — orijinal recovery davranışı: IPv4/IPv6 TCP/443 ClientHello + SNI
 // blacklist match → iki parçaya böl. Uygun değilse (handled=false) döner,
 // paket passthrough edilir.
 func (s *Split2Strategy) Apply(raw, addr []byte, send engine.SendFunc) (bool, error) {
-	if len(raw) < 20 {
+	ver := raw[0] >> 4
+	if ver != 4 && ver != 6 {
 		return false, nil
 	}
-	if raw[0]>>4 != 4 { // IPv4 dışı
-		return false, nil
-	}
-	ipHdrLen := int(raw[0]&0x0F) * 4
-	if ipHdrLen < 20 || len(raw) < ipHdrLen+8 {
-		return false, nil
-	}
-	if raw[9] != 6 { // TCP dışı
+	ipHdrLen, tcpHdrLen, payload, ok := tcpPayload(raw)
+	if !ok {
 		return false, nil
 	}
 
-	tcpHdrLen := int((raw[ipHdrLen+12]>>4)&0x0F) * 4
-	if tcpHdrLen < 20 || len(raw) < ipHdrLen+tcpHdrLen {
-		return false, nil
-	}
-
-	payload := raw[ipHdrLen+tcpHdrLen:]
 	if len(payload) < 50 {
 		return false, nil
 	}

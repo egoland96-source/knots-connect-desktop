@@ -26,14 +26,12 @@
         width: 300px;
         height: 300px;
         display: block;
-        filter: drop-shadow(0 0 26px rgba(28, 200, 255, 0.25));
       }
       .brand {
         font-weight: 800;
         letter-spacing: 3px;
         font-size: 25px;
         color: #eaf6ff;
-        text-shadow: 0 0 22px rgba(28, 200, 255, 0.35);
       }
       .brand span {
         color: #1cc8ff;
@@ -45,6 +43,13 @@
         color: #8fb6c9;
         text-transform: none;
       }
+      .count {
+        margin-top: 4px;
+        font-size: 16px;
+        font-weight: 400;
+        color: #5a7a8e;
+        letter-spacing: 1px;
+      }
     </style>
   </head>
   <body>
@@ -52,6 +57,7 @@
       <canvas id="logo" width="300" height="300"></canvas>
       <div class="brand">KNOTS<span>·</span>CONNECT</div>
       <div class="tag">Connect . Protect . Bypass</div>
+      <div class="count" id="count"></div>
     </div>
 
     <script>
@@ -256,6 +262,21 @@
           requestAnimationFrame(paint);
         }
         requestAnimationFrame(paint);
+      })();
+
+      // Geri sayım: main.cjs Açılış ekranını rastgele 5-18 sn sonra kapatır;
+      // kullanıcı beklerken kalan saniyeyi görsün diye burada da sayılır.
+      (function () {
+        const countEl = document.getElementById('count');
+        if (!countEl) return;
+        const total = Math.max(1000, parseInt(new URLSearchParams(location.search).get('ms') || '8000', 10));
+        const start = performance.now();
+        function tick() {
+          const left = Math.max(0, Math.ceil((total - (performance.now() - start)) / 1000));
+          countEl.textContent = left > 0 ? '≈ ' + left + ' sn' : 'açılıyor…';
+        }
+        tick();
+        setInterval(tick, 250);
       })();
     </script>
   </body>

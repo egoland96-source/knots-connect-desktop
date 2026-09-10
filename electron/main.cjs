@@ -1,8 +1,8 @@
-const { app, BrowserWindow, ipcMain, Menu, net, shell, screen, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, net, shell, screen, clipboard, nativeImage, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
 const readline = require('readline');
 const updater = require('./updater.cjs');
 const { generateHWID } = require('./hwid.cjs');
@@ -12,6 +12,17 @@ try {
   keytar = require('keytar');
 } catch (e) {
   keytar = null;
+}
+
+// Açılış akışını dosyaya yazan tanılama logu — "açılış ekranı açılmıyor"
+// sorununu kullanıcıda teşhis etmek için her kritik adım buraya düşer.
+const bootLogPath = path.join(app.getPath('userData'), 'knots-boot.log');
+function bootLog(msg) {
+  const line = `${new Date().toISOString()} ${msg}`;
+  try {
+    fs.appendFileSync(bootLogPath, line + '\n');
+  } catch {}
+  console.log(line);
 }
 
 // Uygulamanın kendi giden HTTP trafiği (API + gizlilik liste indirme +
@@ -35,121 +46,24 @@ for (const k of ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_
 }
 
 let mainWindow;
+let miniWindow = null;
+let miniModeActive = false;
+let savedBounds = null;
 let splashWindow = null;
 let splashStart = 0;
+let splashWaitMs = 8000; // her açılışta rastgele, 5-18 sn (20 sn altı)
+let splashTimer = null;
 let pythonProcess = null;
 let pythonReadLine = null;
 let goProcess = null;
 let goReadLine = null;
 let goProcessUserStopped = false;
+let tray = null;
+let trayQuitFromMenu = false;
+let internetMonitorTimer = null;
 const rpcCallbacks = new Map();
 let requestIdCounter = 0;
-let currentEngineMode = 'python'; // 'python' or 'go'
-
-// FAZ 3.A — Canlı telemetri & snapshot state (Go motoru canlı akış)
-let telemetryInterval = null;
-let telemetryState = {
-  bytesReceived: 0,
-  bytesSent: 0,
-  latencyMs: 24,
-  ipAddress: null,
-  location: null,
-  isp: null,
-  serverId: null,
-  uptimeSeconds: 0,
-};
-let telemetryUptimeTimer = null;
-
-var SERVER_MAP = {
-  nl: { country: 'Netherlands', city: 'Amsterdam', code: 'NL', lat: 52.37, lon: 4.9 },
-  de: { country: 'Germany', city: 'Frankfurt', code: 'DE', lat: 50.11, lon: 8.68 },
-  us: { country: 'United States', city: 'New York', code: 'US', lat: 40.71, lon: -74 },
-  jp: { country: 'Japan', city: 'Tokyo', code: 'JP', lat: 35.68, lon: 139.76 },
-  gb: { country: 'United Kingdom', city: 'London', code: 'GB', lat: 51.5, lon: -0.12 },
-  fr: { country: 'France', city: 'Paris', code: 'FR', lat: 48.86, lon: 2.35 },
-  sg: { country: 'Singapore', city: 'Singapore', code: 'SG', lat: 1.35, lon: 103.81 },
-  ch: { country: 'Switzerland', city: 'Zurich', code: 'CH', lat: 47.37, lon: 8.54 },
-};
-
-function emitTelemetry(payload) {
-  try {
-    mainWindow?.webContents.send('knots:telemetry', payload);
-  } catch {}
-}
-
-function fetchLiveGeo() {
-  return new Promise((resolve) => {
-    try {
-      const req = net.request('https://ipapi.co/json/');
-      let data = '';
-      req.on('response', (res) => {
-        res.on('data', (c) => (data += c.toString()));
-        res.on('end', () => {
-          try {
-            const j = JSON.parse(data);
-            if (j && j.ip) resolve({ ip: j.ip, country: j.country_name || j.country || '—', city: j.city || '', code: j.country || '—', org: j.org || j.asn || '' });
-            else resolve(null);
-          } catch { resolve(null); }
-        });
-      });
-      req.on('error', () => resolve(null));
-      req.setTimeout(4000, () => { try { req.abort(); } catch {} resolve(null); });
-      req.end();
-    } catch { resolve(null); }
-  });
-}
-
-function startTelemetryLoop(serverId) {
-  stopTelemetryLoop();
-  telemetryState.serverId = serverId || null;
-  telemetryState.bytesReceived = 0;
-  telemetryState.bytesSent = 0;
-  telemetryState.uptimeSeconds = 0;
-  // Jittered latency base per server
-  const base = serverId && SERVER_MAP[serverId] ? SERVER_MAP[serverId].country === 'Japan' || SERVER_MAP[serverId].country === 'Singapore' ? 140 : 35 : 24;
-  telemetryState.latencyMs = base + Math.floor(Math.random() * 8);
-
-  // Uptime counter
-  telemetryUptimeTimer = setInterval(() => {
-    telemetryState.uptimeSeconds += 1;
-  }, 1000);
-
-  telemetryInterval = setInterval(() => {
-    // Simulate live DOWN/UP — Go packet counters would drive this in production
-    const down = 400000 + Math.floor(Math.random() * 900000); // 0.4–1.3 MB/s
-    const up = 80000 + Math.floor(Math.random() * 200000);
-    telemetryState.bytesReceived += down;
-    telemetryState.bytesSent += up;
-    telemetryState.latencyMs = Math.max(12, telemetryState.latencyMs + (Math.random() - 0.5) * 4);
-
-    emitTelemetry({
-      status: 'connected',
-      serverId: telemetryState.serverId,
-      engineMode: currentEngineMode,
-      downloadSpeed: down,
-      uploadSpeed: up,
-      bytesReceived: telemetryState.bytesReceived,
-      bytesSent: telemetryState.bytesSent,
-      latencyMs: Math.round(telemetryState.latencyMs),
-      uptimeSeconds: telemetryState.uptimeSeconds,
-      ipAddress: telemetryState.ipAddress,
-      location: telemetryState.location,
-      isp: telemetryState.isp,
-      protectedBytes: telemetryState.bytesReceived + telemetryState.bytesSent,
-    });
-  }, 1000);
-}
-
-function stopTelemetryLoop() {
-  if (telemetryInterval) {
-    clearInterval(telemetryInterval);
-    telemetryInterval = null;
-  }
-  if (telemetryUptimeTimer) {
-    clearInterval(telemetryUptimeTimer);
-    telemetryUptimeTimer = null;
-  }
-}
+let currentEngineMode = 'go'; // 'python' or 'go' (varsayılan Go motoru — k_main.exe)
 
 const BACKEND_DIR = app.isPackaged
   ? path.join(process.resourcesPath, 'backend')
@@ -157,15 +71,42 @@ const BACKEND_DIR = app.isPackaged
 const PYTHON_SCRIPT_PATH = path.join(BACKEND_DIR, 'k_main.py');
 const GO_ENGINE_PATH = path.join(BACKEND_DIR, 'k_main.exe'); // Go compiled binary
 
+// =========================================================================
+// WIREGUARD TUNNEL YÖNETİMİ — Knots'un satın alınan sunucusuna kurulu
+// WireGuard (wg0, port 62464) üzerinden tam tünel.
+// Windows WireGuard istemcisi "WireGuardTunnel$<ism>" adında bir Windows
+// servisi kurar; uygulama requireAdministrator olduğu için sc.exe ile
+// bu servisi başlatmak/durdurmak/sorgulamak yeterlidir.
+// =========================================================================
+const WG_TUNNEL_NAME = 'KnotsImport';
+const WG_SERVICE = `WireGuardTunnel$${WG_TUNNEL_NAME}`;
+const WG_WG_EXE = path.join('C:', 'Program Files', 'WireGuard', 'wg.exe');
+let wgAutoStart = false;
+
 let appSettingsMemory = {
   autoConnect: false,
   killSwitch: true,
   dnsLeakProtection: true,
   startWithWindows: false,
   autoUpdate: true,
-  aggressiveMode: false,
+  aggressiveMode: true,
   adblock: true,
   dnsMode: 'local', // local | cloudflare
+  wireguardEnabled: false,
+  operatingMode: 'hybrid', // 'gaming' | 'hybrid' | 'privacy'
+  splitTunneling: {
+    enabled: true,
+    autoDetectGames: true,
+    presets: {
+      steam: true,
+      riot: true,
+      epic: true,
+      roblox: true,
+      discordVoice: true,
+    },
+    customApps: [],
+    customIps: [],
+  },
 };
 
 const SETTINGS_FILE = () => path.join(app.getPath('userData'), 'settings.json');
@@ -180,10 +121,13 @@ const SETTING_KEYS = new Set([
   'adblock',
   'encryptionMethod',
   'dnsMode',
+  'wireguardEnabled',
+  'operatingMode',
+  'splitTunneling',
 ]);
 
 function normalizeSettingValue(value) {
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || (typeof value === 'object' && value !== null)) {
     return value;
   }
   return null;
@@ -270,6 +214,11 @@ function startPythonProcess() {
     pythonReadLine = null;
 
     console.log('[Electron] Python motoru 1 saniye içinde otomatik yeniden başlatılacak...');
+    notifyUser(
+      'Knots motor arızası',
+      'VPN motoru beklenmedik şekilde kapandı, 1 saniye içinde otomatik yeniden başlatılıyor.',
+      'motor-crash'
+    );
     setTimeout(() => {
       for (const [id, { reject }] of rpcCallbacks) {
         reject(new Error('Python süreci beklenmedik şekilde sonlandı, yeniden başlatılıyor.'));
@@ -347,27 +296,22 @@ function startGoProcess() {
     goReadLine = null;
     goProcessUserStopped = false;
 
-    // FAZ 3.A — beklenmeyen kapanmada canlı akışı temiz DISCONNECTED'a çek
-    stopTelemetryLoop();
     if (wasUserStopped) {
       console.log('[Electron] Go motoru kullanıcı tarafından durduruldu, yeniden başlatılmiyor.');
-      emitTelemetry({ status: 'disconnected', serverId: null, ipAddress: null, location: null, isp: null, bytesReceived: 0, bytesSent: 0, downloadSpeed: 0, uploadSpeed: 0, latencyMs: 0, uptimeSeconds: 0 });
-      telemetryState.ipAddress = null;
-      telemetryState.location = null;
-      telemetryState.isp = null;
-      telemetryState.serverId = null;
       return;
     }
 
-    emitTelemetry({ status: 'error', serverId: telemetryState.serverId, error: `Go motoru kapandı (kod ${code})` });
     console.log('[Electron] Go motoru 1 saniye içinde otomatik yeniden başlatılacak...');
+    notifyUser(
+      'Knots motor arızası',
+      'VPN motoru beklenmedik şekilde kapandı, 1 saniye içinde otomatik yeniden başlatılıyor.',
+      'motor-crash'
+    );
     setTimeout(() => {
       for (const [id, { reject }] of rpcCallbacks) {
         reject(new Error('Go süreci beklenmedik şekilde sonlandı, yeniden başlatılıyor.'));
         rpcCallbacks.delete(id);
       }
-      // Hata sonrası otomatik DISCONNECTED'a çek (kullanıcı tekrar bağlanana kadar)
-      emitTelemetry({ status: 'disconnected', serverId: null, ipAddress: null, location: null, isp: null });
       startGoProcess();
     }, 1000);
   });
@@ -388,13 +332,94 @@ function stopEngineProcess() {
   }
 }
 
+// =========================================================================
+// WIREGUARD — Windows hizmeti (WireGuardTunnel$<ism>) yönetimi
+// Uygulama admin (requireAdministrator) olarak çalıştığı için sc.exe
+// çağrıları yetki sorunu yaşamaz. Tunnel kapalıyken Knots'un kendi Go
+// DPI motoru çalışmaya devam eder; toggle açılınca tam tünel devreye girer.
+// =========================================================================
+
+function runSc(args) {
+  return new Promise((resolve) => {
+    execFile('sc.exe', args, { windowsHide: true, timeout: 10000 }, (err, stdout, stderr) => {
+      resolve({ ok: !err, code: err ? err.code : 0, stdout: stdout || '', stderr: stderr || '' });
+    });
+  });
+}
+
+function parseScState(stdout) {
+  const m = /STATE\s*:\s*\d+\s*(\w+)/i.exec(stdout || '');
+  return m ? m[1].toUpperCase() : null;
+}
+
+async function wgServiceStatus() {
+  const res = await runSc(['query', WG_SERVICE]);
+  const state = parseScState(res.stdout);
+  const running = state === 'RUNNING' || state === 'START_PENDING' || state === 'STOP_PENDING';
+  return { installed: res.ok, running, state, raw: res.stdout.trim() };
+}
+
+async function wgSetEnabled(enabled) {
+  const status = await wgServiceStatus();
+  if (!status.installed) return { success: false, message: `WireGuard tünel servisi kurulu değil (${WG_SERVICE}).` };
+  if (enabled) {
+    if (status.running) return { success: true, running: true, message: 'WireGuard zaten açık.' };
+    const res = await runSc(['start', WG_SERVICE]);
+    const out = res.stdout + res.stderr;
+    if (/FAILED|already|başlatılamad|Error/i.test(out) && res.code !== 0 && !/running|RUNNING/i.test(out)) {
+      return { success: false, message: `Servis başlatılamadı: ${out.slice(0, 200)}` };
+    }
+    return { success: true, running: true };
+  }
+  // stop
+  if (!status.running) return { success: true, running: false, message: 'WireGuard zaten kapalı.' };
+  const res = await runSc(['stop', WG_SERVICE]);
+  await new Promise((r) => setTimeout(r, 800));
+  return { success: res.ok, running: false };
+}
+
+async function wgRealtimeStatus() {
+  const svc = await wgServiceStatus();
+  let handshakeSec = null;
+  let transfers = null;
+  if (svc.running && fs.existsSync(WG_WG_EXE)) {
+    try {
+      const hs = await new Promise((resolve) => {
+        execFile(WG_WG_EXE, ['show', WG_TUNNEL_NAME, 'latest-handshakes'], { windowsHide: true, timeout: 6000 }, (err, stdout) => {
+          resolve(err ? '' : (stdout || '').trim());
+        });
+      });
+      const tr = await new Promise((resolve) => {
+        execFile(WG_WG_EXE, ['show', WG_TUNNEL_NAME, 'transfer'], { windowsHide: true, timeout: 6000 }, (err, stdout) => {
+          resolve(err ? '' : (stdout || '').trim());
+        });
+      });
+      // format: <pubkey>\t<handshake epoch>  /  <pubkey>\t<rx>\t<tx>
+      const hsLine = hs.split(/\n/).map((l) => l.split(/\t/)).find((p) => p.length >= 2 && /^\d+$/.test(p[1]));
+      if (hsLine) {
+        const now = Math.floor(Date.now() / 1000);
+        handshakeSec = Math.max(0, now - parseInt(hsLine[1], 10));
+      }
+      const trLine = tr.split(/\n/).map((l) => l.split(/\t/)).find((p) => p.length >= 3);
+      if (trLine) transfers = { rxBytes: parseInt(trLine[1], 10) || 0, txBytes: parseInt(trLine[2], 10) || 0 };
+    } catch (_) {}
+  }
+  return {
+    running: svc.running,
+    installed: svc.installed,
+    state: svc.state,
+    server: '162.35.122.121:62464',
+    handshakeSec,
+    transfers,
+  };
+}
+
 // Windows ENOTEMPTY / dosya kilidi için: güncelleme kurulurken Go/Python
 // motorları ve açık file handle'ları SIGKILL ile tamamen sonlandırılır.
 // Bu fonksiyon mevcut IPC/Go başlatma kodlarını bozmadan sadece quit öncesi çağrılır.
 function terminateEnginesForUpdate() {
   console.log('[Electron] terminateEnginesForUpdate — SIGKILL');
   try {
-    stopTelemetryLoop();
     if (goProcess) {
       try { goProcess.kill('SIGKILL'); } catch {}
       goProcess = null;
@@ -417,14 +442,210 @@ function terminateEnginesForUpdate() {
       try { reject(new Error('Update: engine terminated')); } catch {}
       rpcCallbacks.delete(id);
     }
-    // Snapshot'ı da temizle
-    try { emitTelemetry({ status: 'disconnected', serverId: null, ipAddress: null, location: null, isp: null }); } catch {}
-    telemetryState.ipAddress = null;
-    telemetryState.location = null;
-    telemetryState.isp = null;
-    telemetryState.serverId = null;
   } catch (e) {
     console.error('[Electron] terminateEnginesForUpdate failed:', e.message);
+  }
+}
+
+// =========================================================================
+// SPLIT TUNNELING & OPERATING MODES (Smart Hybrid, Gaming, Privacy)
+// =========================================================================
+const GAME_PRESETS = {
+  steam: [
+    { ip: '155.133.224.0', mask: '255.255.224.0', name: 'Steam / Valve EU' },
+    { ip: '162.254.192.0', mask: '255.255.192.0', name: 'Steam / Valve Global' },
+    { ip: '208.64.200.0', mask: '255.255.252.0', name: 'Steam Matchmaking' },
+    { ip: '205.185.194.0', mask: '255.255.255.0', name: 'Steam Relay' },
+  ],
+  riot: [
+    { ip: '104.160.128.0', mask: '255.255.224.0', name: 'Riot Games (Valorant / LoL TR-EU)' },
+    { ip: '162.249.72.0', mask: '255.255.252.0', name: 'Riot Direct' },
+    { ip: '192.64.168.0', mask: '255.255.252.0', name: 'Riot Core' },
+  ],
+  epic: [
+    { ip: '52.0.0.0', mask: '255.224.0.0', name: 'Epic Games / AWS GameLift' },
+    { ip: '54.0.0.0', mask: '255.192.0.0', name: 'Epic Online Services' },
+  ],
+  roblox: [
+    { ip: '128.116.0.0', mask: '255.255.0.0', name: 'Roblox Edge Servers' },
+  ],
+  discordVoice: [
+    { ip: '162.158.0.0', mask: '255.254.0.0', name: 'Discord RTC Voice' },
+    { ip: '66.22.196.0', mask: '255.255.252.0', name: 'Discord Media Voice' },
+  ],
+};
+
+const KNOWN_GAME_EXES = new Set([
+  'cs2.exe', 'csgo.exe', 'valorant.exe', 'valorant-win64-shipping.exe',
+  'riotclientux.exe', 'leagueclient.exe', 'league of legends.exe',
+  'robloxplayerbeta.exe', 'steam.exe', 'steamwebhelper.exe',
+  'epicgameslauncher.exe', 'fortniteclient-win64-shipping.exe',
+  'pubg.exe', 'tslgame.exe', 'r5apex.exe', 'gta5.exe', 'socialclubhelper.exe',
+  'discord.exe', 'battle.net.exe', 'eaconnect.exe'
+]);
+
+let activeSplitRoutes = new Set();
+let physicalGatewayCache = null;
+let splitMonitorInterval = null;
+
+function getPhysicalGateway() {
+  return new Promise((resolve) => {
+    exec('powershell -NoProfile -Command "Get-NetRoute -DestinationPrefix \'0.0.0.0/0\' | Where-Object { $_.InterfaceAlias -notlike \'*WireGuard*\' -and $_.InterfaceAlias -notlike \'*Knots*\' } | Select-Object -First 1 InterfaceAlias, InterfaceIndex, NextHop | ConvertTo-Json"', { windowsHide: true }, (err, stdout) => {
+      if (err || !stdout) {
+        resolve({ gateway: physicalGatewayCache || '192.168.1.1', ifIndex: null });
+        return;
+      }
+      try {
+        const data = JSON.parse(stdout);
+        const gw = data.NextHop || physicalGatewayCache || '192.168.1.1';
+        physicalGatewayCache = gw;
+        resolve({ gateway: gw, ifIndex: data.InterfaceIndex || null, ifAlias: data.InterfaceAlias || '' });
+      } catch {
+        resolve({ gateway: physicalGatewayCache || '192.168.1.1', ifIndex: null });
+      }
+    });
+  });
+}
+
+function runRouteCommand(action, ip, mask, gateway, ifIndex) {
+  return new Promise((resolve) => {
+    let args = [];
+    if (action === 'add') {
+      args = ['add', ip, 'mask', mask, gateway, 'metric', '1'];
+      if (ifIndex) args.push('if', String(ifIndex));
+    } else {
+      args = ['delete', ip];
+    }
+    execFile('route.exe', args, { windowsHide: true, timeout: 5000 }, (err) => {
+      resolve(!err);
+    });
+  });
+}
+
+async function applySplitRoutes() {
+  const settings = appSettingsMemory.splitTunneling || {};
+  if (!settings.enabled) return;
+
+  const { gateway, ifIndex } = await getPhysicalGateway();
+  if (!gateway) return;
+
+  const presets = settings.presets || {};
+  for (const [presetKey, enabled] of Object.entries(presets)) {
+    if (enabled && GAME_PRESETS[presetKey]) {
+      for (const item of GAME_PRESETS[presetKey]) {
+        if (!activeSplitRoutes.has(item.ip)) {
+          const ok = await runRouteCommand('add', item.ip, item.mask, gateway, ifIndex);
+          if (ok) activeSplitRoutes.add(item.ip);
+        }
+      }
+    }
+  }
+
+  // Custom IPs
+  if (Array.isArray(settings.customIps)) {
+    for (const item of settings.customIps) {
+      if (!activeSplitRoutes.has(item.ip)) {
+        const mask = item.mask || '255.255.255.255';
+        const ok = await runRouteCommand('add', item.ip, mask, gateway, ifIndex);
+        if (ok) activeSplitRoutes.add(item.ip);
+      }
+    }
+  }
+  console.log(`[SplitTunnel] Toplam ${activeSplitRoutes.size} aktif bypass rotası devrede (Gateway: ${gateway}).`);
+}
+
+async function clearSplitRoutes() {
+  for (const ip of activeSplitRoutes) {
+    await runRouteCommand('delete', ip);
+  }
+  activeSplitRoutes.clear();
+}
+
+function clearSplitRoutesSync() {
+  for (const ip of activeSplitRoutes) {
+    try {
+      execFileSync('route.exe', ['delete', ip], { windowsHide: true, timeout: 2000 });
+    } catch {}
+  }
+  activeSplitRoutes.clear();
+}
+
+function startSplitMonitor() {
+  if (splitMonitorInterval) return;
+  splitMonitorInterval = setInterval(async () => {
+    const opMode = appSettingsMemory.operatingMode || 'hybrid';
+    const splitCfg = appSettingsMemory.splitTunneling || {};
+    if (opMode !== 'hybrid' || !splitCfg.enabled || !splitCfg.autoDetectGames) return;
+
+    const customApps = (splitCfg.customApps || []).map((a) => a.toLowerCase());
+    const allGameExes = Array.from(KNOWN_GAME_EXES).concat(customApps);
+    const namesList = allGameExes.map((x) => `'${x}'`).join(',');
+
+    exec(
+      `powershell -NoProfile -Command "$names = @(${namesList}); $pids = Get-Process | Where-Object { $names -contains ($_.ProcessName + '.exe') -or $names -contains $_.ProcessName } | Select-Object -ExpandProperty Id; if ($pids) { Get-NetTCPConnection -State Established | Where-Object { $pids -contains $_.OwningProcess -and $_.RemoteAddress -notlike '127.*' -and $_.RemoteAddress -notlike '192.168.*' -and $_.RemoteAddress -notlike '10.*' -and $_.RemoteAddress -notlike '162.35.122.121' } | Select-Object -ExpandProperty RemoteAddress -Unique }"`,
+      { windowsHide: true, timeout: 8000 },
+      async (err, stdout) => {
+        if (err || !stdout) return;
+        const ips = stdout.split(/\r?\n/).map((s) => s.trim()).filter((s) => /^\d+\.\d+\.\d+\.\d+$/.test(s));
+        if (ips.length === 0) return;
+        const { gateway, ifIndex } = await getPhysicalGateway();
+        for (const ip of ips) {
+          if (!activeSplitRoutes.has(ip)) {
+            const ok = await runRouteCommand('add', ip, '255.255.255.255', gateway, ifIndex);
+            if (ok) {
+              activeSplitRoutes.add(ip);
+              console.log(`[SplitTunnel] Oyun akışı doğrudan yerel hatta yönlendirildi: ${ip}`);
+            }
+          }
+        }
+      }
+    );
+  }, 10000);
+}
+
+function stopSplitMonitor() {
+  if (splitMonitorInterval) {
+    clearInterval(splitMonitorInterval);
+    splitMonitorInterval = null;
+  }
+}
+
+async function setOperatingMode(targetMode) {
+  if (!['gaming', 'hybrid', 'privacy'].includes(targetMode)) {
+    return { success: false, message: 'Geçersiz mod' };
+  }
+
+  appSettingsMemory.operatingMode = targetMode;
+  saveAppSettings();
+
+  console.log(`[Electron] Çalışma modu değiştiriliyor: ${targetMode}`);
+
+  if (targetMode === 'gaming') {
+    stopSplitMonitor();
+    await clearSplitRoutes();
+    await wgSetEnabled(false);
+    appSettingsMemory.wireguardEnabled = false;
+    currentEngineMode = 'go';
+    startGoProcess();
+    return { success: true, mode: 'gaming', message: 'Oyun Modu aktif (DPI Bypass - 0 ms gecikme)' };
+  }
+
+  if (targetMode === 'privacy') {
+    stopSplitMonitor();
+    await clearSplitRoutes();
+    await wgSetEnabled(true);
+    appSettingsMemory.wireguardEnabled = true;
+    return { success: true, mode: 'privacy', message: 'Gizlilik Modu aktif (Tam WireGuard tüneli)' };
+  }
+
+  if (targetMode === 'hybrid') {
+    currentEngineMode = 'go';
+    startGoProcess();
+    await wgSetEnabled(true);
+    appSettingsMemory.wireguardEnabled = true;
+    await applySplitRoutes();
+    startSplitMonitor();
+    return { success: true, mode: 'hybrid', message: 'Akıllı Hibrit Mod aktif (Oyunlar 0 ms, Web Korumalı)' };
   }
 }
 
@@ -469,6 +690,94 @@ function sendRpcRequest(method, params, processName, resolve, reject) {
   }, 8000);
 }
 
+// Windows masaüstü bildirimi + renderer'a aynı mesajı iletir.
+// Hem motor arızası hem internet kesintisi gibi kritik durumlarda kullanılır.
+let lastAlertSignature = '';
+function notifyUser(title, body, signature) {
+  const sig = signature || `${title}:${body}`;
+  if (sig === lastAlertSignature) return; // aynı uyarıyı arka arkaya tekrarlama
+  lastAlertSignature = sig;
+  try {
+    const n = new Notification({ title, body, silent: false });
+    n.on('click', () => showMainWindow());
+    n.show();
+    console.log(`[notify] ${title} — ${body}`);
+  } catch (e) {
+    console.error('[notify] bildirim gösterilemedi:', e.message);
+  }
+  try {
+    mainWindow?.webContents.send('knots:systemAlert', { title, body, ts: Date.now() });
+  } catch {}
+}
+
+// İnternet erişilebilirliği: Chromium'un net.isOnline() durumu + gerçek bir
+// bağlantı kontrolü (msftconnecttest, 6sn timeout). Arka arkaya sürekli bildirim
+// basmamak için durum DEĞİŞİMİNDE sola bir kez uyarır.
+function startInternetMonitor() {
+  if (internetMonitorTimer) return;
+  let wasOnline = null; // null = henüz ölçülmedi (ilk sonuç sessizce oturur)
+  internetMonitorTimer = setInterval(async () => {
+    try {
+      const offlineViaNet = typeof net.isOnline === 'function' ? !net.isOnline() : false;
+      let reachable = false;
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 6000);
+        const res = await net.fetch('https://www.msftconnecttest.com/connecttest.txt', {
+          cache: 'no-store',
+          headers: { 'Cache-Control': 'no-cache' },
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        reachable = res.ok;
+      } catch {
+        reachable = false;
+      }
+      const online = !offlineViaNet && reachable;
+
+      if (wasOnline === null) {
+        wasOnline = online;
+        return;
+      }
+      if (wasOnline && !online) {
+        notifyUser(
+          'İnternet bağlantısı kesildi',
+          'Knots internet erişimini algılayamıyor. VPN bağlantısını ve modem durumunu kontrol edin.',
+          'internet-off'
+        );
+      } else if (!wasOnline && online) {
+        notifyUser('İnternet bağlantısı geri geldi', 'Knots internet erişimini yeniden algıladı.', 'internet-on');
+      }
+      wasOnline = online;
+    } catch (e) {
+      console.error('[internet-monitor] hata:', e.message);
+    }
+  }, 15000);
+}
+
+// Açılış ekranı + ana pencereyi güvenle bitir. Birden fazla kez çağrılırsa
+// ikincisi zararsızdır (referanslar null kontrolü ile korunur).
+function closeSplashAndShow() {
+  bootLog(`closeSplashAndShow() ÇAĞRILDI | splash=${!!splashWindow} mainVisible=${mainWindow ? mainWindow.isVisible() : 'null'}`);
+  if (splashTimer) {
+    clearInterval(splashTimer);
+    splashTimer = null;
+  }
+  if (splashWindow) {
+    splashWindow.close();
+    splashWindow = null;
+  }
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+    mainWindow.show();
+    mainWindow.focus();
+    bootLog(`mainWindow.show() ÇAĞRILDI | visible=${mainWindow.isVisible()}`);
+  } else if (mainWindow) {
+    bootLog(`mainWindow zaten görünür | destroyed=${mainWindow.isDestroyed()}`);
+  } else {
+    bootLog('mainWindow NULL!');
+  }
+}
+
 function createSplash() {
   splashWindow = new BrowserWindow({
     width: 460,
@@ -486,47 +795,62 @@ function createSplash() {
       sandbox: true,
     },
   });
-  splashWindow.loadFile(path.join(__dirname, 'splash.html'));
+  splashWindow.loadFile(path.join(__dirname, 'splash.html'), { query: { ms: String(splashWaitMs) } });
   splashWindow.on('closed', () => {
     splashWindow = null;
+    clearInterval(splashTimer);
+    splashTimer = null;
   });
 }
 
 function createWindow() {
-  // Ekrana göre başlangıç boyutu — küçük ekranlarda pencere sığsın
-  let initW = 1050;
-  let initH = 700;
   try {
-    const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
-    initW = Math.min(1050, Math.max(860, sw - 32));
-    initH = Math.min(700, Math.max(600, sh - 64));
-  } catch (_) { /* screen hazır değilse varsayılan */ }
-  mainWindow = new BrowserWindow({
-    width: initW,
-    height: initH,
-    minWidth: 860,
-    minHeight: 600,
-    resizable: true,
-    frame: false,
-    show: false,
-    titleBarStyle: 'hidden',
-    icon: app.isPackaged
-      ? path.join(process.resourcesPath, 'icon.ico')
-      : path.join(__dirname, '..', 'build', 'icon.png'),
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.cjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      webSecurity: true,
-    },
-  });
-  // DevTools artık otomatik açılmıyor — Settings -> Advanced -> Diagnostics
-  // "Show performance overlay" toggle'ı ile isteğe bağlı açılabilir.
-  // Geliştirme sırasında ihtiyaç olursa: mainWindow.webContents.openDevTools({ mode: 'detach' })
-  if (!app.isPackaged && process.env.OPEN_DEVTOOLS === '1') {
-    mainWindow.webContents.openDevTools({ mode: 'detach' });
-  }
+    // Ekrana göre başlangıç boyutu — küçük ekranlarda pencere sığsın
+    let initW = 1050;
+    let initH = 700;
+    try {
+      const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
+      initW = Math.min(1050, Math.max(860, sw - 32));
+      initH = Math.min(700, Math.max(600, sh - 64));
+    } catch (_) { /* screen hazır değilse varsayılan */ }
+    mainWindow = new BrowserWindow({
+      width: initW,
+      height: initH,
+      minWidth: 860,
+      minHeight: 600,
+      resizable: true,
+      frame: false,
+      show: false,
+      titleBarStyle: 'hidden',
+      icon: app.isPackaged
+        ? path.join(process.resourcesPath, 'icon.ico')
+        : path.join(__dirname, '..', 'build', 'icon.png'),
+      webPreferences: {
+        preload: path.join(__dirname, 'preload.cjs'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        webSecurity: true,
+      },
+    });
+    bootLog('BrowserWindow oluşturuldu');
+    // Dev sekmesi ve F12/Ctrl+Shift+I kısayolları kapalı — kullanıcı dev arayüzünü göremez.
+    // NOT: Electron 44'te setDevToolsEnabled kaldırıldı; bu yüzden devtools kısayollarını
+    // before-input-event ile engelliyoruz. setDevToolsEnabled varsa yine de çağrılır.
+    if (typeof mainWindow.webContents.setDevToolsEnabled === 'function') {
+      mainWindow.webContents.setDevToolsEnabled(false);
+    }
+    const isDevToolsShortcut = (input) => {
+      const k = (input.key || '').toLowerCase();
+      if (['f12', 'f7'].includes(k)) return true;
+      if ((input.control || input.meta) && input.shift && ['i', 'j', 'c'].includes(k)) return true;
+      return false;
+    };
+    mainWindow.webContents.on('before-input-event', (event, input) => {
+      if (isDevToolsShortcut(input)) {
+        event.preventDefault();
+      }
+    });
 
   mainWindow.setMenu(null);
 
@@ -552,37 +876,80 @@ function createWindow() {
     return { action: 'allow' };
   });
 
-  if (process.env.NODE_ENV === 'development' || !app.isPackaged) {
-    mainWindow.loadURL('http://localhost:5173');
-  } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
-  }
-
-  // Ana pencere hazır olana ve en az bir süre splash gösterilene kadar bekle.
-  // Arka planda API'ler/oturum hazırlanırken kullanıcı en az 25sn splash görür.
+  // NOT: Bu listener'lar loadFile()'dan ÖNCE bağlanmalı. Aksi halde:
+  // - sayfa çok hızlı yüklenirse ready-to-show / did-finish-load kaçırılır,
+  // - yükleme anında hata olursa did-fail-load kaçırılır
+  // ve splash sonsuza dek açık kalır (gözlenen belirti!). 
+  // Açılış ekranı: ana pencere hazır olduğunda splash için kalan süre kadar bekle,
+  // ama toplam bekleme asla rastgele süreyi geçmez. Ana pencere 3sn içinde bile
+  // hazır olsa kullanıcı en az ~5sn splash görür; hazır değilse splash biter,
+  // pencere yine de açılır (kullanıcıyı sonsuz bekletmez).
   mainWindow.once('ready-to-show', () => {
-    const wait = Math.max(0, 25000 - (Date.now() - splashStart));
+    bootLog('ready-to-show ATEŞLENDİ');
+    const elapsed = Date.now() - splashStart;
+    const wait = Math.max(1500, splashWaitMs - elapsed);
+    bootLog(`splash kalan bekleme: ${wait}ms (splashWaitMs=${splashWaitMs}, elapsed=${elapsed})`);
+    if (splashTimer) clearInterval(splashTimer);
     setTimeout(() => {
-      if (mainWindow) mainWindow.show();
-      if (splashWindow) {
-        splashWindow.close();
-        splashWindow = null;
-      }
+      closeSplashAndShow();
     }, wait);
   });
 
-  // Güvenlik yedeği: ana pencere 30sn içinde hazır olmazsa splash'i kapat.
-  setTimeout(() => {
-    if (splashWindow) {
-      splashWindow.close();
-      splashWindow = null;
+  // Indirme/başlatma bitince de tetikle: ready-to-show hiç ateşlenmezse
+  // (ör. renderer takılırsa) asla takılı kalmasın.
+  mainWindow.webContents.once('did-finish-load', () => {
+    bootLog('did-finish-load ATEŞLENDİ');
+    const elapsed = Date.now() - splashStart;
+    const wait = Math.max(1500, splashWaitMs - elapsed);
+    setTimeout(() => {
+      if (splashWindow || !mainWindow?.isVisible()) closeSplashAndShow();
+    }, wait);
+  });
+
+  // Sayfa yüklenemezse (hata) splash'i derhal kapat, pencereyi göster.
+  mainWindow.webContents.on('did-fail-load', (_e, code, desc) => {
+    bootLog(`did-fail-load (${code}: ${desc})`);
+    console.error(`[Electron] renderer yüklenemedi (${code}: ${desc})`);
+    closeSplashAndShow();
+  });
+
+  // Renderer işlemi çökerse de splash takılı kalmasın.
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    bootLog(`render-process-gone (${details && details.reason})`);
+    console.error('[Electron] renderer öldü:', details && details.reason);
+    closeSplashAndShow();
+  });
+
+  // Renderer içi JS hataları (React çökmesi, ReferenceError vb.) boot log'a düşer.
+  mainWindow.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+    if (level >= 2) {
+      bootLog(`[renderer] ${message} (${sourceId}:${line})`);
     }
-    if (mainWindow && !mainWindow.isVisible()) mainWindow.show();
-  }, 30000);
+  });
+
+  // Güvenlik yedeği: ana pencere hazır DEĞİLSE bile rastgele süre dolunca
+  // splash mutlaka kapanır ve pencere gösterilir — takılı kalma yok.
+  setTimeout(() => {
+    closeSplashAndShow();
+  }, splashWaitMs + 6000);
+
+  if (process.env.NODE_ENV === 'development' || !app.isPackaged) {
+    mainWindow.loadURL('http://localhost:5173').catch((e) => bootLog(`loadURL HATASI: ${e && e.stack || e}`));
+  } else {
+    mainWindow.loadFile(path.join(__dirname, '../dist/index.html')).catch((e) => bootLog(`loadFile HATASI: ${e && e.stack || e}`));
+  }
 
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+
+  bootLog('createWindow TAMAM — eventler bağlandı');
+  } catch (e) {
+    bootLog(`createWindow HATASI: ${e && e.stack || e}`);
+    console.error('[Electron] createWindow hatası:', e);
+    // Ana pencere açılamasa bile splash'i kapatıp hatayı göster.
+    closeSplashAndShow();
+  }
 }
 
 // =========================================================================
@@ -590,147 +957,156 @@ function createWindow() {
 // =========================================================================
 
 ipcMain.handle('knots:connect', async (event, serverId) => {
-  // serverId string veya { serverId, country, city } config objesi olabilir
-  let sid = null;
-  if (typeof serverId === 'string') sid = serverId;
-  else if (serverId && typeof serverId === 'object' && serverId.serverId) sid = String(serverId.serverId);
-  else if (serverId !== undefined && serverId !== null && typeof serverId !== 'string') {
+  if (serverId !== undefined && serverId !== null && typeof serverId !== 'string') {
     return { success: false, message: 'Geçersiz server_id.' };
   }
-
-  // FAZ 3.A — DISCONNECTED -> CONNECTING
-  emitTelemetry({ status: 'connecting', serverId: sid, engineMode: currentEngineMode });
-
   if (currentEngineMode === 'go') {
     if (!goProcess || goProcess.killed) {
       startGoProcess();
     }
-    if (!goProcess || goProcess.killed) {
-      emitTelemetry({ status: 'error', serverId: sid, error: 'Go motoru başlatılamadı.' });
-      return { success: false, message: 'Go motoru başlatılamadı.' };
+    if (goProcess && !goProcess.killed) {
+      return { success: true };
     }
-    // Snapshot için konum/IP — önce server haritasından, sonra canlı geo ile zenginleştir
-    const mapped = sid && SERVER_MAP[sid] ? SERVER_MAP[sid] : null;
-    const fallbackLoc = mapped ? { country: mapped.country, city: mapped.city, code: mapped.code } : { country: 'Netherlands', city: 'Amsterdam', code: 'NL' };
-    telemetryState.ipAddress = '185.24.10.4';
-    telemetryState.location = fallbackLoc;
-    telemetryState.isp = 'Knots Secure';
-    // Canlı geo'yu arka planda dene (başarılı olursa override)
-    fetchLiveGeo().then((geo) => {
-      if (geo && telemetryState.location) {
-        // Bağlıyken hedef lokasyonu koru, ama IP'yi gerçek tünel IP'si gibi göster (mock)
-        // Gerçek prod'da Go tünel çıkış IP'sini bildirir
-      }
-    });
-
-    // Kısa handshake simülasyonu — CONNECTING -> CONNECTED
-    await new Promise((r) => setTimeout(r, 900));
-    if (!goProcess || goProcess.killed) {
-      emitTelemetry({ status: 'error', serverId: sid });
-      return { success: false, message: 'Go motoru handshake sırasında kapandı.' };
-    }
-    startTelemetryLoop(sid);
-    emitTelemetry({
-      status: 'connected',
-      serverId: sid,
-      engineMode: currentEngineMode,
-      ipAddress: telemetryState.ipAddress,
-      location: telemetryState.location,
-      isp: telemetryState.isp,
-      latencyMs: Math.round(telemetryState.latencyMs),
-      uptimeSeconds: 0,
-      downloadSpeed: 0,
-      uploadSpeed: 0,
-      bytesReceived: 0,
-      bytesSent: 0,
-      protectedBytes: 0,
-    });
-    return { success: true, state: 'connected', server_id: sid };
+    return { success: false, message: 'Go motoru başlatılamadı.' };
   }
-  // Python modu — mevcut RPC
-  try {
-    const res = await callEngine('connect', { server_id: sid });
-    if (res?.success) {
-      emitTelemetry({ status: 'connecting', serverId: sid });
-      await new Promise((r) => setTimeout(r, 700));
-      // Python da Go gibi canlı akış başlat
-      const mapped = sid && SERVER_MAP[sid] ? SERVER_MAP[sid] : null;
-      const loc = mapped ? { country: mapped.country, city: mapped.city, code: mapped.code } : { country: 'Netherlands', city: 'Amsterdam', code: 'NL' };
-      telemetryState.ipAddress = '185.24.10.4';
-      telemetryState.location = loc;
-      telemetryState.isp = 'Knots Secure';
-      startTelemetryLoop(sid);
-      emitTelemetry({ status: 'connected', serverId: sid, engineMode: currentEngineMode, ipAddress: telemetryState.ipAddress, location: loc, isp: 'Knots Secure', latencyMs: 28 });
-    }
-    return res;
-  } catch (e) {
-    emitTelemetry({ status: 'error', serverId: sid, error: e.message });
-    throw e;
-  }
+  return callEngine('connect', { server_id: serverId });
 });
 
 ipcMain.handle('knots:disconnect', async () => {
-  // FAZ 3.A — temiz DISCONNECTED + snapshot reset
-  stopTelemetryLoop();
-  emitTelemetry({ status: 'disconnected', serverId: null, ipAddress: null, location: null, isp: null, bytesReceived: 0, bytesSent: 0, downloadSpeed: 0, uploadSpeed: 0, latencyMs: 0, uptimeSeconds: 0 });
-  telemetryState.ipAddress = null;
-  telemetryState.location = null;
-  telemetryState.isp = null;
-  telemetryState.serverId = null;
-  telemetryState.bytesReceived = 0;
-  telemetryState.bytesSent = 0;
-
   if (currentEngineMode === 'go') {
     if (goProcess && !goProcess.killed) {
       goProcessUserStopped = true;
-      try { goProcess.kill('SIGTERM'); } catch {}
-      // SIGKILL fallback 1.2s sonra
-      setTimeout(() => { try { if (goProcess && !goProcess.killed) goProcess.kill('SIGKILL'); } catch {} }, 1200);
+      goProcess.kill('SIGTERM');
     }
-    return { success: true, state: 'disconnected' };
+    return { success: true };
   }
-  try {
-    const res = await callEngine('disconnect');
-    return res;
-  } catch (e) {
-    // Hata olsa da UI'ı temiz DISCONNECTED'a çek
-    return { success: true, state: 'disconnected' };
-  }
+  return callEngine('disconnect');
 });
 
 ipcMain.handle('knots:getStatus', async () => {
   if (currentEngineMode === 'go') {
-    const isRunning = !!(goProcess && !goProcess.killed);
-    const hasTelemetry = !!telemetryInterval;
-    const state = hasTelemetry && isRunning ? 'connected' : isRunning ? 'connecting' : 'disconnected';
+    const isRunning = goProcess && !goProcess.killed;
     return {
-      connected: isRunning && state === 'connected',
-      state,
-      server_id: telemetryState.serverId,
+      connected: isRunning,
+      state: isRunning ? 'connected' : 'disconnected',
+      server_id: null,
       engine_mode: 'go',
-      bytes_received: telemetryState.bytesReceived,
-      bytes_sent: telemetryState.bytesSent,
-      latency_ms: Math.round(telemetryState.latencyMs),
-      ip_address: telemetryState.ipAddress,
-      location: telemetryState.location,
-      isp: telemetryState.isp,
-      uptime_seconds: telemetryState.uptimeSeconds,
-      downloadSpeed: 0,
-      uploadSpeed: 0,
+      bytes_received: 0,
+      bytes_sent: 0,
+      latency_ms: 0,
     };
   }
+  return callEngine('status');
+});
+
+// =========================================================================
+// WIREGUARD IPC — renderer'daki toggle'ın bağlandığı köprüler
+// =========================================================================
+ipcMain.handle('knots:wgStatus', async () => {
   try {
-    const s = await callEngine('status');
-    // Python status'u da snapshot ile zenginleştir
-    return {
-      ...s,
-      ip_address: telemetryState.ipAddress,
-      location: telemetryState.location,
-      isp: telemetryState.isp,
-    };
-  } catch {
-    return { state: 'disconnected', server_id: null, engine_mode: currentEngineMode, bytes_received: 0, bytes_sent: 0, latency_ms: 0, ip_address: null, location: null, isp: null };
+    return await wgRealtimeStatus();
+  } catch (err) {
+    return { running: false, installed: false, error: err.message };
   }
+});
+
+ipcMain.handle('knots:wgEnable', async (_e, enabled) => {
+  try {
+    const res = await wgSetEnabled(!!enabled);
+    if (res.success) wgAutoStart = !!enabled;
+    return res;
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+});
+
+ipcMain.handle('knots:wgSetAutoStart', async (_e, enabled) => {
+  wgAutoStart = !!enabled;
+  return { success: true, value: wgAutoStart };
+});
+
+// =========================================================================
+// SPLIT TUNNELING & OPERATING MODES IPC
+// =========================================================================
+ipcMain.handle('knots:getSplitSettings', async () => {
+  return {
+    splitTunneling: appSettingsMemory.splitTunneling,
+    operatingMode: appSettingsMemory.operatingMode || 'hybrid',
+    activeRoutesCount: activeSplitRoutes.size,
+    physicalGateway: physicalGatewayCache || '192.168.1.1',
+  };
+});
+
+ipcMain.handle('knots:updateSplitSettings', async (_e, settings) => {
+  if (typeof settings === 'object' && settings !== null) {
+    appSettingsMemory.splitTunneling = {
+      ...appSettingsMemory.splitTunneling,
+      ...settings,
+    };
+    saveAppSettings();
+    if (appSettingsMemory.operatingMode === 'hybrid') {
+      await clearSplitRoutes();
+      await applySplitRoutes();
+    }
+    return { success: true, splitTunneling: appSettingsMemory.splitTunneling };
+  }
+  return { success: false, message: 'Geçersiz ayarlar' };
+});
+
+ipcMain.handle('knots:setOperatingMode', async (_e, mode) => {
+  return await setOperatingMode(mode);
+});
+
+ipcMain.handle('knots:getRunningProcesses', async () => {
+  return new Promise((resolve) => {
+    exec(
+      'powershell -NoProfile -Command "Get-Process | Where-Object { $_.MainWindowTitle } | Select-Object ProcessName, Id, MainWindowTitle | ConvertTo-Json -Compress"',
+      { windowsHide: true, timeout: 5000 },
+      (err, stdout) => {
+        if (err || !stdout) return resolve([]);
+        try {
+          const parsed = JSON.parse(stdout);
+          const list = Array.isArray(parsed) ? parsed : [parsed];
+          const results = list
+            .filter((p) => p && p.ProcessName)
+            .map((p) => {
+              const exeName = (p.ProcessName.endsWith('.exe') ? p.ProcessName : `${p.ProcessName}.exe`).toLowerCase();
+              return {
+                name: exeName,
+                pid: p.Id,
+                title: p.MainWindowTitle || p.ProcessName,
+                isGame: KNOWN_GAME_EXES.has(exeName),
+              };
+            });
+          resolve(results);
+        } catch {
+          resolve([]);
+        }
+      }
+    );
+  });
+});
+
+ipcMain.handle('knots:addBypassApp', async (_e, appName) => {
+  if (!appName || typeof appName !== 'string') return { success: false };
+  const clean = appName.trim().toLowerCase();
+  const current = appSettingsMemory.splitTunneling?.customApps || [];
+  if (!current.includes(clean)) {
+    current.push(clean);
+    appSettingsMemory.splitTunneling.customApps = current;
+    saveAppSettings();
+  }
+  return { success: true, customApps: current };
+});
+
+ipcMain.handle('knots:removeBypassApp', async (_e, appName) => {
+  if (!appName || typeof appName !== 'string') return { success: false };
+  const clean = appName.trim().toLowerCase();
+  let current = appSettingsMemory.splitTunneling?.customApps || [];
+  current = current.filter((x) => x !== clean);
+  appSettingsMemory.splitTunneling.customApps = current;
+  saveAppSettings();
+  return { success: true, customApps: current };
 });
 
 ipcMain.handle('knots:setDpiTechniques', async (event, techniques) => {
@@ -820,6 +1196,24 @@ ipcMain.handle('knots:updateSetting', async (event, key, value) => {
     }
   }
 
+  // WireGuard toggle: ayarı kalıcı yap ve Windows WireGuard servisini aç/kapat.
+  // Uygulama admin olduğu için sc.exe yetki sorunu yaşamaz; işlem başarısızsa
+  // ayar geri alınır (UI tutarsız durumda kalmaz).
+  if (key === 'wireguardEnabled') {
+    try {
+      const res = await wgSetEnabled(!!value);
+      if (!res.success) {
+        appSettingsMemory[key] = !safeValue;
+        saveAppSettings();
+        return { success: false, message: res.message || 'WireGuard servisi yönetilemedi.' };
+      }
+      wgAutoStart = !!value;
+      mainWindow?.webContents.send('knots:wgState', await wgRealtimeStatus());
+    } catch (err) {
+      console.error('[Electron] WireGuard toggle hatası:', err.message);
+    }
+  }
+
   // AdBlock toggle'ını çalışan Go motoruna CANLI ilet (yeniden başlatma yok).
   // Motor CLI flag'ini ikinci kez okumaz; stdin RPC ile SetEnabled çağrılır.
   if (key === 'adblock' && currentEngineMode === 'go' && goProcess && !goProcess.killed) {
@@ -838,18 +1232,6 @@ ipcMain.handle('window:maximize', async () => {
   mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize();
 });
 ipcMain.handle('window:close', async () => mainWindow?.close());
-ipcMain.handle('app:toggleDevTools', async () => {
-  if (mainWindow) mainWindow.webContents.toggleDevTools();
-  return { success: true };
-});
-ipcMain.handle('app:openLogs', async () => {
-  try {
-    await shell.openPath(app.getPath('userData'));
-    return { success: true };
-  } catch (e) {
-    return { success: false, message: e.message };
-  }
-});
 
 // =========================================================================
 // PRIVACY PROTECTION: FİLTRE LİSTESİ İNDİRME + DISK CACHE
@@ -1287,6 +1669,177 @@ ipcMain.handle('doh:set', async () => ({ success: true }));
 ipcMain.handle('split:set', async () => ({ success: true }));
 
 // =========================================================================
+// MINI MODE — oyun oynarken RAM tasarrufu için pencereyi kareye indir
+// Motor + tüm state arka planda çalışmaya devam eder; React sayfaları
+// unmount olur → renderer RAM düşer. Tıklayınca eski boyut + sayfa geri gelir.
+// =========================================================================
+function createMiniWindow() {
+  if (miniWindow && !miniWindow.isDestroyed()) return miniWindow;
+  const sz = 64;
+  // Ana pencerenin ortasına konumlandır (kullanıcının baktığı yerde kalsın)
+  let x, y;
+  if (savedBounds) {
+    x = Math.round(savedBounds.x + (savedBounds.width - sz) / 2);
+    y = Math.round(savedBounds.y + (savedBounds.height - sz) / 2);
+  } else if (mainWindow && !mainWindow.isDestroyed()) {
+    const b = mainWindow.getBounds();
+    x = Math.round(b.x + (b.width - sz) / 2);
+    y = Math.round(b.y + (b.height - sz) / 2);
+  } else {
+    const { width: w, height: h } = screen.getPrimaryDisplay().workAreaSize;
+    x = Math.round((w - sz) / 2);
+    y = Math.round((h - sz) / 2);
+  }
+  // Ekrandan taşma kontrolü
+  const display = screen.getDisplayMatching({ x, y, width: sz, height: sz });
+  const work = display.workArea;
+  x = Math.max(work.x, Math.min(x, work.x + work.width - sz));
+  y = Math.max(work.y, Math.min(y, work.y + work.height - sz));
+
+  miniWindow = new BrowserWindow({
+    width: sz,
+    height: sz,
+    x,
+    y,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: true,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    hasShadow: false,
+    focusable: true,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, 'mini-preload.cjs'),
+    }
+  });
+  miniWindow.setIgnoreMouseEvents(false);
+  miniWindow.loadFile(path.join(__dirname, 'mini.html'));
+  return miniWindow;
+}
+
+ipcMain.handle('window:enterMini', () => {
+  if (miniModeActive) return { success: false };
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    // Ana pencere zaten yoksa sadece mini aç
+    miniModeActive = true;
+    try { createMiniWindow(); } catch (e) { console.error('[mini]', e.message); }
+    broadcastMiniMode(true);
+    return { success: true };
+  }
+  // Ana pencere state'ini kaydet
+  if (mainWindow.isMaximized()) mainWindow.unmaximize();
+  savedBounds = mainWindow.getBounds();
+  miniModeActive = true;
+  // Ana pencereyi TAMAMEN yok et → renderer process ölür, RAM serbest kalır
+  try {
+    mainWindow.removeAllListeners('close');
+    mainWindow.removeAllListeners('closed');
+    mainWindow.destroy();
+  } catch (e) {
+    console.error('[mini] destroy main failed:', e.message);
+  }
+  mainWindow = null;
+  // Bağımsız küçük pencere aç
+  try { createMiniWindow(); } catch (e) { console.error('[mini] create failed:', e.message); }
+  broadcastMiniMode(true);
+  return { success: true };
+});
+
+ipcMain.on('mini:exit', () => {
+  exitMiniInternal();
+});
+
+ipcMain.on('mini:toggle', () => {
+  if (miniModeActive) {
+    exitMiniInternal();
+  } else {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('knots:miniMode', { active: true });
+    }
+  }
+});
+
+// Mini pencere sürükleme: HTML tarafında mousemove ile incremental (dx,dy) gönderilir.
+// Her delta'da pencere setBounds ile taşınır, ekran sınırları içinde tutulur.
+ipcMain.on('mini:drag:move', (_e, { dx, dy } = {}) => {
+  if (!miniWindow || miniWindow.isDestroyed()) return;
+  if (typeof dx !== 'number' || typeof dy !== 'number') return;
+  if (dx === 0 && dy === 0) return;
+  const b = miniWindow.getBounds();
+  const nx = b.x + Math.round(dx);
+  const ny = b.y + Math.round(dy);
+  const d = screen.getDisplayMatching({ x: nx, y: ny, width: 64, height: 64 });
+  const wa = d.workArea;
+  const cx = Math.max(wa.x, Math.min(nx, wa.x + wa.width - 64));
+  const cy = Math.max(wa.y, Math.min(ny, wa.y + wa.height - 64));
+  miniWindow.setBounds({ x: cx, y: cy, width: 64, height: 64 });
+});
+
+ipcMain.handle('window:exitMini', () => {
+  exitMiniInternal();
+  return { success: true };
+});
+
+function exitMiniInternal() {
+  if (!miniModeActive) return;
+  if (miniWindow && !miniWindow.isDestroyed()) {
+    miniWindow.close();
+  }
+  miniWindow = null;
+  miniModeActive = false;
+  // Ana pencere yok edildiği için sıfırdan oluştur
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    try {
+      createWindow();
+    } catch (e) {
+      console.error('[mini] createWindow failed:', e.message);
+    }
+  }
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setSkipTaskbar(false);
+    if (savedBounds) {
+      mainWindow.setBounds(savedBounds);
+      savedBounds = null;
+    }
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  }
+  broadcastMiniMode(false);
+}
+
+ipcMain.handle('window:miniStatus', () => ({ active: miniModeActive }));
+
+// X butonu: pencereyi gizle, motor arka planda çalışsın (tray'dan dönülür)
+ipcMain.handle('window:hideToTray', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return { success: false };
+  if (miniModeActive && savedBounds) {
+    mainWindow.setBounds(savedBounds);
+    savedBounds = null;
+    mainWindow.setAlwaysOnTop(false);
+    miniModeActive = false;
+    broadcastMiniMode(false);
+  }
+  mainWindow.hide();
+  return { success: true };
+});
+
+ipcMain.handle('window:showFromTray', () => {
+  showMainWindow();
+  return { success: true };
+});
+
+// Mini mode durumunu renderer'a anlık bildir
+function broadcastMiniMode(active) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('knots:miniMode', { active });
+  }
+}
+
+// =========================================================================
 // AUTH IPC HANDLERS
 // =========================================================================
 
@@ -1375,21 +1928,81 @@ try {
 } catch {}
 process.on('unhandledRejection', (reason) => {
   const msg = String(reason?.message || reason);
+  bootLog(`unhandledRejection: ${msg}`);
   if (msg.includes('ENOTEMPTY') || msg.includes('updater') || msg.includes('autoUpdater')) {
     console.error('[updater] unhandledRejection (handled):', msg);
   }
+});
+process.on('uncaughtException', (err) => {
+  bootLog(`uncaughtException: ${err && err.stack || err}`);
+  console.error('[Electron] uncaughtException:', err);
 });
 
 // =========================================================================
 // UYGULAMA YAŞAM DÖNGÜSÜ
 // =========================================================================
 
+// Uygulamanın tek örnek olarak çalışmasını zorla. Kullanıcı ikinci kez açarsa
+// mevcut pencere öne gelir. Aksi halde iki örnek aynı anda splash gösterebilir
+// ve biri diğerini engeller.
+const gotSingleLock = app.requestSingleInstanceLock();
+if (!gotSingleLock) {
+  bootLog('İkinci örnek başlatıldı — mevcut örneğe odaklan, yeni örnek kapatılıyor.');
+  app.quit();
+}
+
 app.whenReady().then(() => {
+  bootLog(`whenReady OK | dir=${__dirname}`);
   Menu.setApplicationMenu(null);
   loadAppSettings();
+  const opMode = appSettingsMemory.operatingMode || 'hybrid';
+  console.log(`[Electron] Başlangıç çalışma modu: ${opMode}`);
+  if (opMode === 'hybrid') {
+    wgSetEnabled(true).then((res) => {
+      if (res.success) {
+        console.log('[WireGuard] Hibrit mod için başlatıldı.');
+        applySplitRoutes();
+        startSplitMonitor();
+      }
+    });
+  } else if (opMode === 'privacy') {
+    wgSetEnabled(true).then((res) => {
+      if (res.success) console.log('[WireGuard] Gizlilik modu için başlatıldı.');
+    });
+  } else {
+    // gaming mode
+    wgSetEnabled(false);
+  }
+  // Açılış ekranı süresi her seferinde rastgele: 5-18 sn (20 sn altı).
+  // Kullanıcı beklerken splash'te geri sayım görür, süre dolunca ana ekran açılır.
+  splashWaitMs = 5000 + Math.floor(Math.random() * 14000); // 5.000 - 18.999 ms
+  bootLog(`splashWaitMs=${splashWaitMs}`);
   createSplash();
   splashStart = Date.now();
   createWindow();
+  bootLog('createWindow çağrıldı — sonrası geldi');
+  startInternetMonitor();
+
+  // System tray: oyun oynarken X basınca kapanmasın, arka planda çalışsın
+  try {
+    const iconPath = path.join(__dirname, '..', 'build', 'icon.ico');
+    const trayIcon = fs.existsSync(iconPath) ? nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 }) : nativeImage.createEmpty();
+    tray = new Tray(trayIcon);
+    const trayMenu = Menu.buildFromTemplate([
+      { label: 'KNOTS — Aç', click: () => { showMainWindow(); } },
+      { type: 'separator' },
+      { label: 'Mini Mode (Küçük kare)', click: () => { showMainWindow(); if (mainWindow) mainWindow.webContents.send('knots:miniMode', { active: true }); } },
+      { type: 'separator' },
+      { label: 'Çıkış (motoru da kapat)', click: () => { trayQuitFromMenu = true; stopSplitMonitor(); clearSplitRoutesSync(); stopEngineProcess(); app.quit(); } },
+    ]);
+    tray.setToolTip('Knots Connect');
+    tray.setContextMenu(trayMenu);
+    tray.on('click', () => showMainWindow());
+    tray.on('double-click', () => showMainWindow());
+  } catch (e) {
+    console.error('[tray] init failed:', e.message);
+  }
+
   // Dev modunda güncellemeyi pasif al — yalnızca paketlenmiş canlı sürümde kontrol
   if (app.isPackaged) {
     updater.checkForUpdates(sendUpdateStatus);
@@ -1399,7 +2012,26 @@ app.whenReady().then(() => {
   }
 });
 
-app.on('window-all-closed', () => {
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
+  }
+  if (miniModeActive) {
+    exitMiniInternal();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  if (!mainWindow.isVisible()) mainWindow.show();
+  mainWindow.focus();
+}
+
+app.on('window-all-closed', (e) => {
+  if (process.platform === 'darwin') return;
+  // Tray varsa arka planda çalışmaya devam et; sadece menüden "Çıkış" seçilirse kapat
+  if (tray && !trayQuitFromMenu) return;
+  stopSplitMonitor();
+  clearSplitRoutesSync();
   stopEngineProcess();
-  if (process.platform !== 'darwin') app.quit();
+  app.quit();
 });

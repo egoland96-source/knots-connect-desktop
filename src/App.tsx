@@ -41,6 +41,7 @@ import { useConnectionStore } from './store/connectionStore';
 import { usePrivacyStore } from './store/privacyStore';
 import { useAuthStore } from './store/authStore';
 import { useNavStore } from './store/navStore';
+import { ConnectionStatusToast } from './components/ui/ConnectionStatusToast';
 
 type UpdateState = { status: 'downloading' | 'ready' | 'error'; version?: string; detail?: string } | null;
 
@@ -142,7 +143,7 @@ const [authState, setAuthState] = useState<'loading' | 'authenticated' | 'unauth
   }
 
   return (
-    <div className="app-shell">
+    <div className="app-shell">`n      <ConnectionStatusToast />
       <AnimatePresence mode="wait">
         <motion.div
           key="app"

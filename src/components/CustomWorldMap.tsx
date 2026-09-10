@@ -24,6 +24,7 @@ type Props = {
   nodes?: MapNode[];
   selectedId?: string | null;
   onSelectNode?: (node: MapNode | null) => void;
+  connection?: { fromLat: number; fromLon: number; toLat: number; toLon: number } | null;
 };
 
 // Single land mass is ~15x cheaper to project than 177 countries
@@ -34,7 +35,7 @@ try {
   landFeature = (feature as any)(src, src.objects.land);
 } catch {}
 
-export const CustomWorldMap = ({ lat, lon, markerLat, markerLon, zoom = 1, nodes = [], selectedId, onSelectNode }: Props) => {
+export const CustomWorldMap = ({ lat, lon, markerLat, markerLon, zoom = 1, nodes = [], selectedId, onSelectNode, connection }: Props) => {
   const mLat = markerLat ?? lat;
   const mLon = markerLon ?? lon;
   const width = 1000;
@@ -96,6 +97,24 @@ export const CustomWorldMap = ({ lat, lon, markerLat, markerLon, zoom = 1, nodes
             </g>
           );
         })}
+
+        {/* Active tunnel line — real connection when connected */}
+        {connection &&
+          (() => {
+            const from = projection([connection.fromLon, connection.fromLat] as any) as [number, number] | null;
+            const to = projection([connection.toLon, connection.toLat] as any) as [number, number] | null;
+            if (!from || !to) return null;
+            const mx = (from[0] + to[0]) / 2;
+            const my = (from[1] + to[1]) / 2 - 34;
+            const d = `M ${from[0]} ${from[1]} Q ${mx} ${my} ${to[0]} ${to[1]}`;
+            return (
+              <g style={{ pointerEvents: 'none' }}>
+                <path d={d} fill="none" stroke="rgba(52,211,153,0.22)" strokeWidth={5} strokeLinecap="round" style={{ filter: 'blur(6px)' }} />
+                <path d={d} fill="none" stroke="#34D399" strokeWidth={1.4} strokeDasharray="6 4" opacity={0.95} />
+                <circle cx={from[0]} cy={from[1]} r={3.4} fill="#34D399" stroke="#fff" strokeWidth={1} />
+              </g>
+            );
+          })()}
 
         {/* Main user/server pulsing dot (only when no node is selected to avoid clutter) */}
         {dot && !selectedId && (

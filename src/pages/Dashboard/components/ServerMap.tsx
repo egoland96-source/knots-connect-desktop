@@ -11,6 +11,8 @@ type Props = {
   isConnected?: boolean;
   defaultLat?: number;
   defaultLon?: number;
+  connectLabel?: string;
+  connection?: { fromLat: number; fromLon: number; toLat: number; toLon: number } | null;
 };
 
 const toMapNode = (n: ServerNode): MapNode => ({
@@ -24,7 +26,7 @@ const toMapNode = (n: ServerNode): MapNode => ({
   load: n.load,
 });
 
-export const ServerMap: React.FC<Props> = ({ nodes, activeId = null, onSelect, onConnect, isConnected, defaultLat = 39.0, defaultLon = 35.0 }) => {
+export const ServerMap: React.FC<Props> = ({ nodes, activeId = null, onSelect, onConnect, isConnected, defaultLat = 39.0, defaultLon = 35.0, connectLabel = 'Connect', connection = null }) => {
   const mapNodes: MapNode[] = nodes.map(toMapNode);
   const [selected, setSelected] = useState<MapNode | null>(null);
 
@@ -36,8 +38,9 @@ export const ServerMap: React.FC<Props> = ({ nodes, activeId = null, onSelect, o
     }
   }, [activeId]);
 
-  const centerLat = selected ? selected.lat : isConnected ? 52.37 : defaultLat;
-  const centerLon = selected ? selected.lon : isConnected ? 4.9 : defaultLon;
+  // Merkez: seçili node > (bağlıyken Dashboard'ın verdiği gerçek hizmet konumu) > varsayılan.
+  const centerLat = selected ? selected.lat : defaultLat;
+  const centerLon = selected ? selected.lon : defaultLon;
   const zoom = selected ? 5.2 : isConnected ? 4.4 : 3.2;
 
   const [mapCenter, setMapCenter] = useState({ lat: centerLat, lon: centerLon, zoom });
@@ -120,12 +123,13 @@ export const ServerMap: React.FC<Props> = ({ nodes, activeId = null, onSelect, o
       <CustomWorldMap
         lat={mapCenter.lat}
         lon={mapCenter.lon}
-        markerLat={isConnected ? 52.37 : defaultLat}
-        markerLon={isConnected ? 4.9 : defaultLon}
+        markerLat={defaultLat}
+        markerLon={defaultLon}
         zoom={mapCenter.zoom}
         nodes={mapNodes}
         selectedId={selected?.id ?? null}
         onSelectNode={handleSelect}
+        connection={connection}
       />
 
       {/* Neon halo overlay for active/connected — CSS pulsating halo behind CustomWorldMap pins */}
@@ -202,7 +206,7 @@ export const ServerMap: React.FC<Props> = ({ nodes, activeId = null, onSelect, o
                 boxShadow: '0 6px 16px rgba(59,130,246,0.28)',
               }}
             >
-              Bağlan
+              {connectLabel}
             </button>
           )}
         </div>

@@ -112,17 +112,16 @@ func main() {
 	eng := engine.NewEngine()
 
 	if globalMode {
-		// GoodbyeDPI -k tarzı GLOBAL BYPASS: blacklist yok — TÜM SNI'li TLS
-		// ClientHello, SNI hostname'i ORTADAN bölünerek 2 parçaya ayrılır
-		// (splitv). Hiçbir segment hostname'i bütün taşımaz → DPI akışı video
-		// CDN/işaretli host olarak etiketleyemez; Roblox dahil her şey geçer.
-		// Tek strateji kaydedilir → ucuz, hızlı, öngörülebilir (parçalar arası
-		// gecikme yok, ana döngü bloke olmaz).
+		// HEDEFLİ BYPASS: blacklist'teki domainler parçalanır, diğer tüm
+		// siteler (msftconnecttest.com bağlantı kontrolü dahil) PASSTHROUGH.
+		// forceAll değil — yoksa TÜM sitelerin ClientHello'su parçalanır ve
+		// Cloudflare benzeri CDN'ler reddedip "internet yok" izlenimi verir.
+		// Discord (IP-frag) dalı force'tan bağımsız uygulanır (aşağıda).
 		sv := NewSplitVStrategy(blacklist, mode)
-		sv.SetForceAll(true)
+		sv.SetForceAll(false)
 		eng.Register(sv)
 		eng.SetPoolFallback("splitv")
-		fmt.Fprintf(os.Stderr, "[go-engine] global bypass aktif (splitv: SNI gizleme) | video CDN muafiyeti yok\n")
+		fmt.Fprintf(os.Stderr, "[go-engine] hedefli bypass aktif (splitv: yalnız blacklist + Discord IP-frag) | diğer siteler dokunulmaz\n")
 	} else {
 		// Strateji havuzu (kayıt sırası, eşit skorda öncelik demektir).
 		switch mode {
@@ -285,7 +284,12 @@ func main() {
 				fmt.Fprintf(os.Stderr, "[go-engine] yeni akış: %s → %s:%d%s\n",
 					ipStr4(packet.Raw, 12), ipStr4(packet.Raw, 16), info.DstPort,
 					map[bool]string{true: " [MSS512]", false: ""}[clamped])
-				if info.DstPort != 443 {
+				// Sahte SYN'ler yalnız yüksek portlu oyun/game akışlarına basılır
+				// (49xxx-65535). Normal web (80/443) ve diğer portlara fake
+				// basılmaz — her akışa 3 gereksiz sahte paket, DPI'ı aşırı
+				// yorar ve "internet takılıyor" izlenimi verir (msftconnecttest
+				// gibi kritik akışlar dahil).
+				if info.DstPort > 49000 && info.DstPort < 65536 {
 					sendSynFakes(packet.Raw, packet.Addr, func(raw, addr []byte) error {
 						return wd.Send(&VpnPacket{Raw: raw, Addr: addr})
 					})

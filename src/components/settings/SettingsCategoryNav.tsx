@@ -1,5 +1,5 @@
 import React from 'react';
-import { PlugZap, Shield, Eye, Palette, SlidersHorizontal } from 'lucide-react';
+import { PlugZap, Shield, GitFork, Eye, Palette, SlidersHorizontal } from 'lucide-react';
 import type { SettingsCategory } from '../../types/settings';
 
 type Props = {
@@ -10,6 +10,7 @@ type Props = {
 const ITEMS: { key: SettingsCategory; label: string; icon: React.ComponentType<any>; desc: string }[] = [
   { key: 'connection', label: 'Connection', icon: PlugZap, desc: 'Engine & behavior' },
   { key: 'security', label: 'Security', icon: Shield, desc: 'Kill switch & leaks' },
+  { key: 'split-tunneling', label: 'Split Tunneling', icon: GitFork, desc: 'Game bypass & 0ms ping' },
   { key: 'local-protection', label: 'Local Protection', icon: Eye, desc: 'Blocklists & stats' },
   { key: 'appearance', label: 'Appearance', icon: Palette, desc: 'Theme & window' },
   { key: 'advanced', label: 'Advanced', icon: SlidersHorizontal, desc: 'Diagnostics & logs' },

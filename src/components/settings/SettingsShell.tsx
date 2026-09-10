@@ -3,6 +3,7 @@ import { SettingsCategoryNav } from './SettingsCategoryNav';
 import type { SettingsCategory } from '../../types/settings';
 import { ConnectionSettings } from './sections/ConnectionSettings';
 import { SecuritySettings } from './sections/SecuritySettings';
+import { SplitTunnelingSettings } from './sections/SplitTunnelingSettings';
 import { LocalProtectionSettings } from './sections/LocalProtectionSettings';
 import { AppearanceSettings } from './sections/AppearanceSettings';
 import { AdvancedSettings } from './sections/AdvancedSettings';
@@ -70,6 +71,7 @@ export const SettingsShell: React.FC = () => {
         >
           {active === 'connection' && <ConnectionSettings onSaved={() => showToast('✓ Preferences saved')} />}
           {active === 'security' && <SecuritySettings onSaved={() => showToast('✓ Preferences saved')} />}
+          {active === 'split-tunneling' && <SplitTunnelingSettings onSaved={() => showToast('✓ Preferences saved')} />}
           {active === 'local-protection' && <LocalProtectionSettings onSaved={() => showToast('✓ Preferences saved')} />}
           {active === 'appearance' && <AppearanceSettings onSaved={() => showToast('✓ Preferences saved')} />}
           {active === 'advanced' && <AdvancedSettings onSaved={() => showToast('✓ Preferences saved')} />}

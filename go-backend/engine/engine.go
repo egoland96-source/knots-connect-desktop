@@ -27,6 +27,9 @@ import (
 // işlenir — "oyun-pool hafızası": ne çalıştıysa onunla devam et.
 var gamePoolRe = regexp.MustCompile(`-\d+-\d+-\d+-\d+\.roblox\.com$`)
 
+// debugCHs — ClientHello teşhis logu sayacı (ilk birkaç pakette basılır).
+var debugCHs int
+
 // Ek oyun-ulaşım hostları (DNS ile doğrulandı): voice.roblox.com CNAME
 // olarak edge-term4-ams2.roblox.com → 128.116.21.3 (oyun edge IP) çözülür;
 // SNI her zaman ORİJİNAL hostname olarak kalır (CNAME değil), bu yüzden
@@ -220,6 +223,10 @@ func (e *Engine) HandleOutbound(info PacketInfo, raw, addr []byte, send SendFunc
 		strategy, ok = e.Selector.Select(e.Registry, info, now)
 	}
 	if !ok {
+		if dsc := debugCHs; dsc < 5 {
+			debugCHs++
+			logf("[engine][dbg] ClientHello DEĞERLENDİRİLEMEDİ: vroto=%s:%d sni=%q (selector boş — hold=%v cooldown=?)", ipStr(raw, 16, 20), info.DstPort, sni, e.Registry.InHold(now))
+		}
 		return false, nil
 	}
 
@@ -227,6 +234,12 @@ func (e *Engine) HandleOutbound(info PacketInfo, raw, addr []byte, send SendFunc
 	if err != nil {
 		logf("[engine] strateji %s hata: %v", strategy.Metadata().ID, err)
 		return false, err
+	}
+	if !handled {
+		if dsc := debugCHs; dsc < 5 {
+			debugCHs++
+			logf("[engine][dbg] strateji %s passthrough: hedef=%s:%d sni=%q (Apply false)", strategy.Metadata().ID, ipStr(raw, 16, 20), info.DstPort, sni)
+		}
 	}
 
 	// Akış izlemeye yalnızca strateji GERÇEKTEN işlediyse başla:

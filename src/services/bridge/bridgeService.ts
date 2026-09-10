@@ -1,4 +1,13 @@
-import type { ConnectResult, DisconnectResult, EngineMode, EngineStatus } from './bridgeService.types';
+import type {
+  ConnectResult,
+  DisconnectResult,
+  EngineMode,
+  EngineStatus,
+  OperatingMode,
+  SplitStatus,
+  SplitTunnelingConfig,
+  RunningProcessItem,
+} from './bridgeService.types';
 
 /**
  * DPI bypass motoru (k_main.py) ile konuşan servis katmanı.
@@ -104,6 +113,54 @@ export const bridgeService = {
   setEncryptionMethod: async (methodId: number): Promise<any> => {
     if (window.knots && typeof window.knots.setEncryptionMethod === 'function') {
       return window.knots.setEncryptionMethod(methodId);
+    }
+  },
+
+  // =========================================================================
+  // SMART SPLIT TUNNELING & OPERATING MODES
+  // =========================================================================
+
+  /** Split Tunneling ve çalışma modu ayarlarını sorgular. */
+  getSplitSettings: async (): Promise<SplitStatus | null> => {
+    if (window.knots && typeof window.knots.getSplitSettings === 'function') {
+      return window.knots.getSplitSettings();
+    }
+    return null;
+  },
+
+  /** Split Tunneling konfigürasyonunu günceller. */
+  updateSplitSettings: async (settings: Partial<SplitTunnelingConfig>): Promise<any> => {
+    if (window.knots && typeof window.knots.updateSplitSettings === 'function') {
+      return window.knots.updateSplitSettings(settings);
+    }
+  },
+
+  /** 3 kademeli çalışma modunu ('gaming' | 'hybrid' | 'privacy') ayarlar. */
+  setOperatingMode: async (mode: OperatingMode): Promise<any> => {
+    if (window.knots && typeof window.knots.setOperatingMode === 'function') {
+      return window.knots.setOperatingMode(mode);
+    }
+  },
+
+  /** Açık olan uygulamaları listeler (Split Tunneling için). */
+  getRunningProcesses: async (): Promise<RunningProcessItem[]> => {
+    if (window.knots && typeof window.knots.getRunningProcesses === 'function') {
+      return window.knots.getRunningProcesses();
+    }
+    return [];
+  },
+
+  /** Özel bir uygulamayı bypass listesine ekler. */
+  addBypassApp: async (appName: string): Promise<any> => {
+    if (window.knots && typeof window.knots.addBypassApp === 'function') {
+      return window.knots.addBypassApp(appName);
+    }
+  },
+
+  /** Özel bir uygulamayı bypass listesinden çıkarır. */
+  removeBypassApp: async (appName: string): Promise<any> => {
+    if (window.knots && typeof window.knots.removeBypassApp === 'function') {
+      return window.knots.removeBypassApp(appName);
     }
   },
 };

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { PlugZap, Network, Zap, RotateCcw } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { PlugZap, Network, Zap, RotateCcw, ShieldCheck } from 'lucide-react';
 import { useConnectionStore } from '../../../store/connectionStore';
 
 const SectionHeader: React.FC<{ title: string; desc: string; icon?: React.ReactNode }> = ({ title, desc, icon }) => (
@@ -34,11 +34,36 @@ export const ConnectionSettings: React.FC<{ onSaved: () => void }> = ({ onSaved 
   const setEngineMode = useConnectionStore((s) => s.setEngineMode);
   const setEncryptionMethod = useConnectionStore((s) => s.setEncryptionMethod);
   const toggleSetting = useConnectionStore((s) => s.toggleSetting);
+  const setWireGuard = useConnectionStore((s) => s.setWireGuard);
+  const wgStatus = useConnectionStore((s) => s.wgStatus);
+  const wgBusy = useConnectionStore((s) => s.wgBusy);
 
   const isLocked = status === 'connected' || status === 'connecting';
   const [encOpen, setEncOpen] = useState(false);
   const ENC_OPTIONS = ['XOR Mask', 'Bit Swap', 'UDP Pad'];
   const encLabel = ENC_OPTIONS[(encryptionMethod ?? 1) - 1] ?? 'XOR Mask';
+
+  // WireGuard toggle durumunda servis durumunu düzenli tazele (her 8 sn)
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      useConnectionStore.getState().refreshWgStatus();
+    }, 8000);
+    useConnectionStore.getState().refreshWgStatus();
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const wgRunning = !!wgStatus?.running;
+  const wgHandshakeText =
+    wgRunning && wgStatus?.handshakeSec != null
+      ? wgStatus.handshakeSec < 60
+        ? `${wgStatus.handshakeSec}s`
+        : `${Math.round(wgStatus.handshakeSec / 60)}m`
+      : null;
+
+  const handleWgToggle = async () => {
+    await setWireGuard(!wgRunning);
+    onSaved();
+  };
 
   const handleEngineChange = async (mode: 'python' | 'go') => {
     if (isLocked) return;
@@ -162,6 +187,61 @@ export const ConnectionSettings: React.FC<{ onSaved: () => void }> = ({ onSaved 
           </div>
         }
       />
+
+      {/* WireGuard VPN — satın alınan sunucuya tam tünel */}
+      <div style={{ marginTop: 6, padding: '14px 14px 12px', borderRadius: 12, background: 'rgba(59,130,246,0.06)', border: `1px solid ${wgRunning ? 'rgba(52,211,153,0.3)' : 'rgba(59,130,246,0.14)'}` }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ width: 28, height: 28, borderRadius: 8, display: 'grid', placeItems: 'center', background: wgRunning ? 'rgba(52,211,153,0.14)' : 'rgba(59,130,246,0.14)', color: wgRunning ? '#34D399' : '#3B82F6', border: `1px solid ${wgRunning ? 'rgba(52,211,153,0.24)' : 'rgba(59,130,246,0.2)'}` }}>
+                <ShieldCheck size={14} />
+              </span>
+              <span style={{ fontSize: 13.5, fontWeight: 800, color: '#F8FAFC', letterSpacing: '-0.01em' }}>WireGuard VPN</span>
+              {wgRunning && wgHandshakeText && (
+                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', padding: '3px 7px', borderRadius: 999, background: 'rgba(52,211,153,0.12)', border: '1px solid rgba(52,211,153,0.22)', color: '#34D399', fontFamily: 'DM Mono, monospace' }}>
+                  HANDSHAKE {wgHandshakeText}
+                </span>
+              )}
+              {!wgRunning && (
+                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', padding: '3px 7px', borderRadius: 999, background: 'rgba(148,163,184,0.1)', border: '1px solid rgba(148,163,184,0.16)', color: '#94A3B8', fontFamily: 'DM Mono, monospace' }}>
+                  OFF
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: 12, color: '#94A3B8', marginTop: 5, lineHeight: 1.5 }}>
+              Full-tunnel to Knots server {wgStatus?.server ? `(${wgStatus.server})` : '(162.35.122.121)'} — bypasses any protocol-level filtering.
+            </div>
+            {!wgStatus?.installed && (
+              <div style={{ marginTop: 6, fontSize: 11.5, color: '#FB7185', lineHeight: 1.4 }}>
+                WireGuard Windows hizmeti algılanamadı. Önce «C:\Program Files\WireGuard» kurulu değilse WireGuard uygulamasını kurmayı deneyin.
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={handleWgToggle}
+            disabled={wgBusy || !wgStatus?.installed}
+            role="switch"
+            aria-checked={wgRunning}
+            title={wgBusy ? 'İşleniyor...' : undefined}
+            style={{
+              width: 44,
+              height: 26,
+              borderRadius: 999,
+              border: '1px solid',
+              borderColor: wgRunning ? 'rgba(52,211,153,0.9)' : 'rgba(255,255,255,0.14)',
+              background: wgRunning ? '#34D399' : 'rgba(255,255,255,0.10)',
+              position: 'relative',
+              cursor: wgBusy || !wgStatus?.installed ? 'not-allowed' : 'pointer',
+              opacity: wgBusy ? 0.6 : 1,
+              transition: 'all 160ms ease',
+              flexShrink: 0,
+            }}
+          >
+            <span style={{ position: 'absolute', top: 2, left: wgRunning ? 20 : 2, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 160ms ease', boxShadow: '0 2px 8px rgba(0,0,0,0.22)' }} />
+          </button>
+        </div>
+      </div>
 
       {/* Toggles */}
       <Row

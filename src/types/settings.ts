@@ -1,4 +1,4 @@
-export type SettingsCategory = 'connection' | 'security' | 'local-protection' | 'appearance' | 'advanced';
+export type SettingsCategory = 'connection' | 'security' | 'split-tunneling' | 'local-protection' | 'appearance' | 'advanced';
 
 export type BlocklistCategory = 'ads' | 'trackers' | 'malware';
 
