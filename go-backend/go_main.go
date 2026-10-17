@@ -1,3 +1,4 @@
+
 // go_main.go — Knots Adaptive Network Engine (Go WinDivert motoru) girişi.
 //
 // Mimarî (kullanıcının kararı):
@@ -20,6 +21,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -101,7 +103,7 @@ func main() {
 
 	wd, err := OpenVpnHandle(filterExpr)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[go-engine] WinDivert açılamadı: %v\n", err)
+		fmt.Fprintf(os.Stderr, "[go-engine] WinDivertOpen failed: %v\n", err)
 		os.Exit(1)
 	}
 	defer wd.Close()
@@ -112,16 +114,26 @@ func main() {
 	eng := engine.NewEngine()
 
 	if globalMode {
-		// HEDEFLİ BYPASS: blacklist'teki domainler parçalanır, diğer tüm
-		// siteler (msftconnecttest.com bağlantı kontrolü dahil) PASSTHROUGH.
-		// forceAll değil — yoksa TÜM sitelerin ClientHello'su parçalanır ve
-		// Cloudflare benzeri CDN'ler reddedip "internet yok" izlenimi verir.
-		// Discord (IP-frag) dalı force'tan bağımsız uygulanır (aşağıda).
+		// GENİŞ HAVUZ: hedefli ama 5 strateji + splitv — gaming’de de çok seçenek, tek splitv ile takılma olmasın
+		switch mode {
+		case 3:
+			eng.Register(NewSplit3Strategy(blacklist, mode))
+			eng.Register(NewSplit2Strategy(blacklist, mode))
+			eng.Register(NewRecFragStrategy(blacklist, mode))
+			eng.Register(NewSplitAStrategy(blacklist, mode))
+			eng.Register(NewFakeTtlStrategy(blacklist, mode))
+		default:
+			eng.Register(NewSplit2Strategy(blacklist, mode))
+			eng.Register(NewRecFragStrategy(blacklist, mode))
+			eng.Register(NewSplitAStrategy(blacklist, mode))
+			eng.Register(NewSplit3Strategy(blacklist, mode))
+			eng.Register(NewFakeTtlStrategy(blacklist, mode))
+		}
 		sv := NewSplitVStrategy(blacklist, mode)
 		sv.SetForceAll(false)
 		eng.Register(sv)
 		eng.SetPoolFallback("splitv")
-		fmt.Fprintf(os.Stderr, "[go-engine] hedefli bypass aktif (splitv: yalnız blacklist + Discord IP-frag) | diğer siteler dokunulmaz\n")
+		fmt.Fprintf(os.Stderr, "[go-engine] geniş havuz aktif (5 strateji + splitv) | global=%v\n", globalMode)
 	} else {
 		// Strateji havuzu (kayıt sırası, eşit skorda öncelik demektir).
 		switch mode {
@@ -185,6 +197,8 @@ func main() {
 	// akış: outbound ClientHello -> strateji; inbound -> monitor.
 	var recvCount, sendOk, sendErr, outCount, winMinCount, fakeSynCount, udpIn, udpOut int
 	diagRadd := 0
+	packetLogger := NewPacketLogger()
+
 	// Oyun/443-dışı akış izleme: SYN → SYN-ACK/RST kararını görmek için.
 	synSeen := make(map[string]time.Time)  // akış -> son SYN zamanı
 	synAcked := make(map[string]bool)      // akış -> handshake cevabı alındı mı
@@ -320,23 +334,120 @@ func main() {
 			}
 		}
 
+		var handled bool
+
 		if packet.IsOutbound() {
 			// Superonline profili: SYN paketlerinde TCP Window=16 (Min).
-			// DPI'ın reassembly buffer'ını doldurur; sunucu minik parçalarda
-			// gönderir. ClientHello olmadığı için strateji akışını etkilemez.
-			if wm := windowMinTransform(packet.Raw); wm != nil {
-				winMinCount++
-				packet.Raw = wm
+			// SADECE blacklist ile eşleşen hedeflere uygulanır; diğer trafik değiştirilmez.
+			if len(packet.Raw) >= 20 {
+				hl := int(packet.Raw[0] & 0x0F) * 4
+				if len(packet.Raw) >= hl+20 {
+					thl := int((packet.Raw[hl+12] >> 4) & 0x0F) * 4
+					if len(packet.Raw) >= hl+thl {
+						payload := packet.Raw[hl+thl:]
+						if len(payload) >= 5 && payload[0] == 0x16 && payload[1] == 0x03 && len(payload) > 5 && payload[5] == 0x01 {
+							sni := ExtractSNI(payload)
+							if sni != "" && MatchesDomain(sni, blacklist) {
+										if wm := windowMinTransform(packet.Raw); wm != nil {
+											winMinCount++
+											packet.Raw = wm
+										}
+							}
+						}
+					}
+				}
 			}
 
-			handled, _ := eng.HandleOutbound(info, packet.Raw, packet.Addr, func(raw, addr []byte) error {
+			handled, _ = eng.HandleOutbound(info, packet.Raw, packet.Addr, func(raw, addr []byte) error {
 				return wd.Send(&VpnPacket{Raw: raw, Addr: addr})
 			})
 			if handled {
+				packetLogger.Log(fmt.Sprintf("%d.%d.%d.%d", packet.Raw[12], packet.Raw[13], packet.Raw[14], packet.Raw[15]), fmt.Sprintf("%d.%d.%d.%d", packet.Raw[16], packet.Raw[17], packet.Raw[18], packet.Raw[19]), 0, 0, "TCP", "-", len(packet.Raw)-20, "", "split2", fmt.Sprintf("%s adresine bağlantı → SNI gizlendi (bypass uygulandı)", fmt.Sprintf("%d.%d.%d.%d", packet.Raw[16], packet.Raw[17], packet.Raw[18], packet.Raw[19])), "green")
 				continue
 			}
 		} else {
 			eng.ObserveInbound(info, packet.Raw)
+		}
+
+		// --- GERÇEK ZAMANLI PAKET GÜNLÜĞÜ ---
+		// Her paket için teknik veri + sade açıklama üretir ve ring buffer'a yazar.
+		{
+			sni := ""
+			payload := []byte{}
+			ihl := 0
+			if len(packet.Raw) >= 20 {
+				ihl = int(packet.Raw[0] & 0x0F) * 4
+			}
+			if info.Proto == 6 && len(packet.Raw) >= ihl+20 {
+				thl := int((packet.Raw[ihl+12] >> 4) & 0x0F) * 4
+				if len(packet.Raw) >= ihl+thl {
+					payload = packet.Raw[ihl+thl:]
+				}
+			} else if info.Proto == 17 && len(packet.Raw) >= ihl+8 {
+				payload = packet.Raw[ihl+8:]
+			}
+			if len(payload) >= 5 && payload[0] == 0x16 && payload[1] == 0x03 {
+				sni = ExtractSNI(payload)
+			}
+
+			flagsStr := ""
+			if info.Proto == 6 && len(packet.Raw) >= 20 {
+				ihl := int(packet.Raw[0] & 0x0F) * 4
+				if len(packet.Raw) >= ihl+14 {
+					flagByte := packet.Raw[ihl+13]
+					if flagByte&0x02 != 0 { flagsStr += "SYN" }
+					if flagByte&0x10 != 0 { if flagsStr != "" { flagsStr += "+" }; flagsStr += "ACK" }
+					if flagByte&0x08 != 0 { if flagsStr != "" { flagsStr += "+" }; flagsStr += "PSH" }
+					if flagByte&0x04 != 0 { if flagsStr != "" { flagsStr += "+" }; flagsStr += "RST" }
+					if flagByte&0x01 != 0 { if flagsStr != "" { flagsStr += "+" }; flagsStr += "FIN" }
+					if flagsStr == "" { flagsStr = "-" }
+				}
+			} else {
+				flagsStr = "-"
+			}
+
+			srcIP := ""
+			dstIP := ""
+			srcPort := 0
+			dstPort := 0
+			if len(packet.Raw) >= 20 {
+				srcIP = fmt.Sprintf("%d.%d.%d.%d", packet.Raw[12], packet.Raw[13], packet.Raw[14], packet.Raw[15])
+				dstIP = fmt.Sprintf("%d.%d.%d.%d", packet.Raw[16], packet.Raw[17], packet.Raw[18], packet.Raw[19])
+				ihl := int(packet.Raw[0] & 0x0F) * 4
+				if info.Proto == 6 && len(packet.Raw) >= ihl+20 {
+					srcPort = int(binary.BigEndian.Uint16(packet.Raw[ihl : ihl+2]))
+					dstPort = int(binary.BigEndian.Uint16(packet.Raw[ihl+2 : ihl+4]))
+				} else if info.Proto == 17 && len(packet.Raw) >= ihl+8 {
+					srcPort = int(binary.BigEndian.Uint16(packet.Raw[ihl : ihl+2]))
+					dstPort = int(binary.BigEndian.Uint16(packet.Raw[ihl+2 : ihl+4]))
+				}
+			}
+
+			protoStr := "TCP"
+			if info.Proto == 17 {
+				protoStr = "UDP"
+			}
+
+			// Strateji tespiti: hangi işlem uygulandı?
+			stratName := "passthrough"
+			if winMinCount > 0 && info.Proto == 6 {
+				// Not exact per packet, but approximation
+				if len(payload) == 0 && flagsStr == "SYN-" {
+					stratName = "windowMin"
+				}
+			}
+			if handled {
+				if sni != "" {
+					stratName = "split2"
+				} else {
+					stratName = "split2"
+				}
+			}
+
+			payloadSize := len(payload)
+
+			desc, color := describePacket(srcIP, dstIP, srcPort, dstPort, protoStr, flagsStr, payloadSize, sni, stratName)
+			packetLogger.Log(srcIP, dstIP, srcPort, dstPort, protoStr, flagsStr, payloadSize, sni, stratName, desc, color)
 		}
 
 		if err := wd.Send(packet); err != nil {

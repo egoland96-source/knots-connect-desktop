@@ -7,6 +7,7 @@ import landAtlasRaw from 'world-atlas/land-110m.json?raw';
 export type MapNode = {
   id: string;
   country: string;
+  city?: string;
   code: string;
   lat: number;
   lon: number;
@@ -36,20 +37,22 @@ try {
 } catch {}
 
 export const CustomWorldMap = ({ lat, lon, markerLat, markerLon, zoom = 1, nodes = [], selectedId, onSelectNode, connection }: Props) => {
-  const mLat = markerLat ?? lat;
-  const mLon = markerLon ?? lon;
+  const mLat = markerLat ?? 39.0;
+  const mLon = markerLon ?? 35.0;
   const width = 1000;
   const height = 500;
   const scale = (width / (2 * Math.PI)) * (0.78 + zoom * 0.62);
 
-  const projection = geoMercator().scale(scale).translate([width / 2, height / 2]).center([lon, lat]);
+  // Spherical rotation around the polar axis rotates the entire globe before projecting.
+  // This wraps longitudes continuously across 360° and eliminates the hard cutoff at -180° / +180°.
+  const projection = geoMercator()
+    .scale(scale)
+    .translate([width / 2, height / 2])
+    .rotate([-lon, 0])
+    .center([0, lat]);
   const path = geoPath(projection as any);
   const landD = landFeature ? path(landFeature as any) : null;
   const dot = projection([mLon, mLat] as any) as [number, number] | null;
-
-  // Note: pan/zoom is now handled by the parent stage via CSS transform on this whole
-  // container — this component is purely presentational and never re-renders on drag,
-  // so it stays at 60fps even on large maps. The parent updates `lat/lon/zoom` only on drag-end.
 
   return (
     <div
@@ -57,12 +60,19 @@ export const CustomWorldMap = ({ lat, lon, markerLat, markerLon, zoom = 1, nodes
       style={{
         position: 'absolute',
         inset: 0,
-        background: 'radial-gradient(ellipse 92% 72% at 50% 36%, #0f1e36 0%, #070d1a 58%, #050a14 100%)',
+        background: '#12252E',
         overflow: 'hidden',
       }}
     >
       <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: '100%', display: 'block' }} preserveAspectRatio="xMidYMid slice">
-        <g fill="none" stroke="rgba(255,255,255,0.028)" strokeWidth={0.6}>
+        <defs>
+          <linearGradient id="routeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#58BFD2" />
+            <stop offset="100%" stopColor="#61D1A8" />
+          </linearGradient>
+        </defs>
+
+        <g fill="none" stroke="rgba(255,255,255,0.025)" strokeWidth={0.6}>
           {Array.from({ length: 5 }).map((_, i) => {
             const y = (height / 6) * (i + 1);
             return <line key={`h-${i}`} x1={0} y1={y} x2={width} y2={y} />;
@@ -73,56 +83,86 @@ export const CustomWorldMap = ({ lat, lon, markerLat, markerLon, zoom = 1, nodes
           })}
         </g>
 
-        {landD && <path d={landD} fill="rgba(255,255,255,0.055)" stroke="rgba(255,255,255,0.095)" strokeWidth={0.7} />}
+        {landD && <path d={landD} fill="#24434B" stroke="#789C9E" strokeWidth={0.7} strokeOpacity={0.4} />}
 
-        {/* Neon server nodes with count badges */}
+        {/* Server nodes */}
         {nodes.map((n) => {
           const p = projection([n.lon, n.lat] as any) as [number, number] | null;
           if (!p) return null;
           const isSelected = selectedId === n.id;
           return (
             <g key={n.id} onClick={(e) => { e.stopPropagation(); onSelectNode?.(n); }} style={{ cursor: 'pointer' }}>
-              {/* Outer glow */}
-              <circle cx={p[0]} cy={p[1]} r={isSelected ? 18 : 14} fill={isSelected ? 'rgba(61,181,255,0.22)' : 'rgba(61,181,255,0.14)'} style={{ animation: 'custom-map-pulse 2.2s ease-out infinite' }} />
-              {/* Core pin */}
-              <circle cx={p[0]} cy={p[1]} r={7} fill={isSelected ? '#3DB5FF' : '#2FA0E8'} stroke="rgba(255,255,255,0.96)" strokeWidth={1.4} />
-              <circle cx={p[0]} cy={p[1]} r={2.2} fill="#fff" />
-              {/* Count badge */}
-              <g transform={`translate(${p[0] + 10}, ${p[1] - 10})`}>
-                <rect x={-14} y={-8} width={28} height={14} rx={7} fill="rgba(12,22,38,0.88)" stroke="rgba(61,181,255,0.32)" strokeWidth={0.8} />
-                <text x={0} y={0} dy="0.35em" textAnchor="middle" fontSize={7.5} fontWeight={700} fill="#8fd4ff" style={{ fontFamily: 'Inter, sans-serif', letterSpacing: '0.3px' }}>
-                  {n.code} • {n.count}
-                </text>
-              </g>
+              {/* Outer halo — radius and fill animate on selection */}
+              <circle
+                cx={p[0]} cy={p[1]}
+                r={isSelected ? 14 : 10}
+                fill={isSelected ? 'rgba(88,191,210,0.25)' : 'rgba(88,191,210,0.12)'}
+                style={{ transition: 'r 0.25s cubic-bezier(0.34,1.56,0.64,1), fill 0.2s ease' }}
+              />
+              {/* Core dot — brightens on selection */}
+              <circle
+                cx={p[0]} cy={p[1]}
+                r={5.5}
+                fill={isSelected ? '#58BFD2' : '#287FB9'}
+                stroke="#EEF4F5"
+                strokeWidth={1.2}
+                style={{ transition: 'fill 0.2s ease' }}
+              />
+              <circle cx={p[0]} cy={p[1]} r={1.8} fill="#fff" />
+              <text
+                x={p[0]}
+                y={p[1] + 16}
+                textAnchor="middle"
+                fontSize={9}
+                fontWeight={isSelected ? 700 : 500}
+                fill={isSelected ? '#58BFD2' : '#9DB0B7'}
+                style={{ fontFamily: 'Inter, sans-serif', pointerEvents: 'none', userSelect: 'none' }}
+              >
+                {n.city || n.country}
+              </text>
             </g>
           );
         })}
 
-        {/* Active tunnel line — real connection when connected */}
+        {/* Restrained Route line: Cyan near device -> Muted green near secure exit (Spec Page 7) */}
         {connection &&
           (() => {
             const from = projection([connection.fromLon, connection.fromLat] as any) as [number, number] | null;
             const to = projection([connection.toLon, connection.toLat] as any) as [number, number] | null;
             if (!from || !to) return null;
             const mx = (from[0] + to[0]) / 2;
-            const my = (from[1] + to[1]) / 2 - 34;
+            const my = (from[1] + to[1]) / 2 - 28;
             const d = `M ${from[0]} ${from[1]} Q ${mx} ${my} ${to[0]} ${to[1]}`;
             return (
               <g style={{ pointerEvents: 'none' }}>
-                <path d={d} fill="none" stroke="rgba(52,211,153,0.22)" strokeWidth={5} strokeLinecap="round" style={{ filter: 'blur(6px)' }} />
-                <path d={d} fill="none" stroke="#34D399" strokeWidth={1.4} strokeDasharray="6 4" opacity={0.95} />
-                <circle cx={from[0]} cy={from[1]} r={3.4} fill="#34D399" stroke="#fff" strokeWidth={1} />
+                <path d={d} fill="none" stroke="url(#routeGradient)" strokeWidth={2.4} strokeLinecap="round" opacity={0.92} />
+                
+                {/* Endpoint: This device */}
+                <circle cx={from[0]} cy={from[1]} r={5} fill="#111D26" stroke="#58BFD2" strokeWidth={2} />
+                <text x={from[0]} y={from[1] + 16} textAnchor="middle" fontSize={9} fontWeight={600} fill="#9DB0B7" style={{ fontFamily: 'Inter, sans-serif' }}>
+                  This device
+                </text>
+
+                {/* Endpoint: Secure exit */}
+                <circle cx={to[0]} cy={to[1]} r={16} fill="rgba(97,209,168,0.16)" stroke="#61D1A8" strokeWidth={1.5}>
+                  <animate attributeName="r" values="10;22;10" dur="2.4s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" values="0.8;0.12;0.8" dur="2.4s" repeatCount="indefinite" />
+                </circle>
+                <circle cx={to[0]} cy={to[1]} r={5} fill="#111D26" stroke="#61D1A8" strokeWidth={2} />
+                <text x={to[0]} y={to[1] - 12} textAnchor="middle" fontSize={9} fontWeight={600} fill="#61D1A8" style={{ fontFamily: 'Inter, sans-serif' }}>
+                  Secure exit
+                </text>
               </g>
             );
           })()}
 
-        {/* Main user/server pulsing dot (only when no node is selected to avoid clutter) */}
-        {dot && !selectedId && (
+        {/* Device location pin when idle */}
+        {dot && !selectedId && !connection && (
           <g style={{ pointerEvents: 'none' }}>
-            <circle cx={dot[0]} cy={dot[1]} r={42} fill="rgba(61,181,255,0.13)" style={{ animation: 'custom-map-pulse 2.6s ease-out infinite' }} />
-            <circle cx={dot[0]} cy={dot[1]} r={22} fill="rgba(61,181,255,0.19)" style={{ animation: 'custom-map-pulse 2.6s ease-out infinite', animationDelay: '0.38s' } as any} />
-            <circle cx={dot[0]} cy={dot[1]} r={7.2} fill="#3DB5FF" stroke="rgba(255,255,255,0.96)" strokeWidth={1.5} />
-            <circle cx={dot[0]} cy={dot[1]} r={2.3} fill="#fff" />
+            <circle cx={dot[0]} cy={dot[1]} r={6} fill="#58BFD2" stroke="#EEF4F5" strokeWidth={1.5} />
+            <text x={dot[0]} y={dot[1] + 16} textAnchor="middle" fontSize={9} fontWeight={600} fill="#9DB0B7" style={{ fontFamily: 'Inter, sans-serif' }}>
+              This device
+            </text>
           </g>
         )}
       </svg>

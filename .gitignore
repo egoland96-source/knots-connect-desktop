@@ -59,3 +59,12 @@ src/pages/Settings/**/*.json
 # Env
 .env
 .env.local
+
+# Local tooling and archives
+claudex/
+mobile-app.zip
+release-*/
+backend/*.bak*
+backend/*.old*
+go-backend/k_main*.exe
+

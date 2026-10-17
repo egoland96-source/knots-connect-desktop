@@ -1,3 +1,5 @@
+//go:build ignore
+
 // registry.go — strateji havuzu. Tüm stratejiler buraya kaydedilir;
 // kayıt sırası, eşit skorlarda öncelik sırasını belirler.
 package engine

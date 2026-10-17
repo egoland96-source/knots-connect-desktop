@@ -1,3 +1,4 @@
+
 // windivert_wrap.go — WinDivert.dll için minimal, kendi içinde yeterli wrapper.
 //
 // ÖNEMLİ (Recv crash düzeltmesi): Recv çağrısında HER seferinde make ile yeni
@@ -13,6 +14,7 @@ package main
 import (
 	"fmt"
 	"net"
+	"os"
 	"runtime"
 	"sync"
 	"syscall"
@@ -70,7 +72,8 @@ func OpenVpnHandle(filter string) (*VpnHandle, error) {
 		uintptr(0),
 	)
 	if handle == ^uintptr(0) { // INVALID_HANDLE_VALUE
-		return nil, fmt.Errorf("WinDivertOpen başarısız (sürücü yüklü mü?)")
+		winErr := syscall.GetLastError()
+		return nil, fmt.Errorf("WinDivertOpen başarısız: code=%d filter=%q pid=%d arch=%s", winErr, filter, os.Getpid(), runtime.GOARCH)
 	}
 	return &VpnHandle{
 		h:    handle,

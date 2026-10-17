@@ -1,48 +1,93 @@
 @echo off
-setlocal
+setlocal enabledelayedexpansion
 cd /d "%~dp0"
+title Knots Connect - Gelistirici ve Baslatma Araci
 
-echo ============================================
-echo   KNOTS VPN - Emulator Baslatma Sihirbazi
-echo ============================================
+:menu
+cls
+echo ========================================================
+echo               KNOTS CONNECT DESKTOP & ENGINE
+echo ========================================================
 echo.
+echo   [1] Masaustu Uygulamasini Baslat (Electron + Vite Dev)
+echo   [2] Go DPI Motorunu Derle (go-backend -> backend/k_main.exe)
+echo   [3] TypeScript Tip Kontrolu Yap (npm run typecheck)
+echo   [4] Mobil Uygulamayi Baslat (Expo React Native)
+echo   [5] WinDivert Surucusunu Durdur / Sifirla
+echo   [0] Cikis
+echo.
+echo ========================================================
+set /p secim="Seciminiz (0-5): "
 
-echo [1/3] APK derleniyor...
-cd /d "%~dp0mobile\android"
-call gradlew.bat assembleDebug -q
-if errorlevel 1 goto :error
+if "%secim%"=="1" goto dev_desktop
+if "%secim%"=="2" goto build_go
+if "%secim%"=="3" goto typecheck
+if "%secim%"=="4" goto dev_mobile
+if "%secim%"=="5" goto reset_windivert
+if "%secim%"=="0" exit /b 0
 
-echo [2/3] Emulator kontrol ediliyor...
-adb devices | findstr /c:"emulator-" >nul
-if %errorlevel% neq 0 (
-    echo     Emulator baslatiliyor (test)...
-    start "" "C:\telefonum\emulator\emulator.exe" -avd test -no-snapshot-load -no-boot-anim
-    adb wait-for-device
-) else (
-    echo     Emulator zaten calisiyor.
+echo Gecersiz secim, lutfen tekrar deneyin.
+timeout /t 2 >nul
+goto menu
+
+:dev_desktop
+cls
+echo [1/1] Knots Desktop Dev modu baslatiliyor...
+call npm run dev
+pause
+goto menu
+
+:build_go
+cls
+echo [1/2] Go DPI motoru derleniyor...
+cd /d "%~dp0go-backend"
+go build -o k_main.exe
+if errorlevel 1 (
+    echo [HATA] Go derleme basarisiz oldu!
+    cd /d "%~dp0"
+    pause
+    goto menu
 )
-
-echo     Android boot bekleniyor...
-:waitboot
-timeout /t 2 /nobreak >nul
-adb shell getprop sys.boot_completed 2>nul | findstr /x "1" >nul
-if errorlevel 1 goto waitboot
-
-echo [3/3] APK kuruluyor ve uygulama aciliyor...
-adb install -r "app\build\outputs\apk\debug\app-debug.apk"
-adb shell am start -n com.knots.mobile/.MainActivity
-
+echo [2/2] Derlenen k_main.exe backend/ klasorune kopyalaniyor...
+copy /y k_main.exe "..\backend\k_main.exe" >nul
+cd /d "%~dp0"
 echo.
-echo ============================================
-echo   HAZIR! Uygulama emulatorde acildi.
-echo ============================================
+echo [BASARILI] k_main.exe basariyla derlendi ve guncellendi.
 pause
-exit /b 0
+goto menu
 
-:error
-echo.
-echo HATA: Derleme basarisiz oldu.
+:typecheck
+cls
+echo TypeScript tip kontrolu calistiriliyor...
+call npm run typecheck
+if errorlevel 1 (
+    echo [UYARI] TypeScript kontrollerinde hatalar bulundu.
+) else (
+    echo [BASARILI] Tum tipler hatasiz dogrulandi!
+)
 pause
-exit /b 1
+goto menu
 
-0e78ebc253beb9ceb2dab6b04904a1e496bf6682a6d08f497b29afe9c6d12a76
+:dev_mobile
+cls
+echo Mobil katman (Expo) baslatiliyor...
+if exist "mobile\android" (
+    cd /d "%~dp0mobile\android"
+    call npx expo start
+) else (
+    echo [HATA] mobile\android dizini bulunamadi!
+)
+cd /d "%~dp0"
+pause
+goto menu
+
+:reset_windivert
+cls
+echo WinDivert servisi durduruluyor ve temizleniyor...
+sc stop WinDivert >nul 2>&1
+sc delete WinDivert >nul 2>&1
+sc stop WinDivert14 >nul 2>&1
+sc delete WinDivert14 >nul 2>&1
+echo WinDivert servis kayitlari sifirlandi.
+pause
+goto menu

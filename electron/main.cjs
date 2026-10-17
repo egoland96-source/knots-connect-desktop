@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain, Menu, Tray, net, shell, screen, clipboard, 
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { spawn, execFile } = require('child_process');
+const { spawn, execFile, exec } = require('child_process');
 const readline = require('readline');
 const updater = require('./updater.cjs');
 const { generateHWID } = require('./hwid.cjs');
@@ -58,6 +58,20 @@ let pythonReadLine = null;
 let goProcess = null;
 let goReadLine = null;
 let goProcessUserStopped = false;
+
+// =========================================================================
+// SMART SPLIT TUNNELING — İkinci DPI engine instance'ları
+// goGameProcess  : --mode=game-bypass → sadece oyun trafiğine DPI bypass
+// goSocialProcess: --mode=social-vpn  → sosyal medya SNI tespiti + WG telemetrisi
+// =========================================================================
+let goGameProcess = null;       // Oyun bypass instance
+let goGameReadLine = null;
+let goSocialProcess = null;     // Sosyal medya VPN route instance
+let goSocialReadLine = null;
+let smartSplitEnabled = false;  // Smart Split aktif mi?
+const smartSplitRpcCallbacks = new Map();
+let smartSplitRpcCounter = 0;
+
 let tray = null;
 let trayQuitFromMenu = false;
 let internetMonitorTimer = null;
@@ -101,7 +115,7 @@ let appSettingsMemory = {
       steam: true,
       riot: true,
       epic: true,
-      roblox: true,
+      roblox: false,
       discordVoice: true,
     },
     customApps: [],
@@ -245,7 +259,9 @@ function startGoProcess() {
   // DPI Tactics: default sni-split, plus any persisted techniques
   const dpiTechniques = appSettingsMemory.dpiTechniques || ['sni-split'];
   const dpiFlags = Array.isArray(dpiTechniques) ? dpiTechniques.map((t) => `--${t}`) : ['--sni-split'];
-  goProcess = spawn(GO_ENGINE_PATH, [`--method=${methodId}`, adblockFlag, '--fake=true', globalFlag, ...dpiFlags], {
+  const modeFlag = smartSplitEnabled ? '--mode=smart-split' : '--mode=full';
+
+  goProcess = spawn(GO_ENGINE_PATH, [`--method=${methodId}`, adblockFlag, '--fake=true', globalFlag, modeFlag, ...dpiFlags], {
     cwd: BACKEND_DIR,
     env: env,
     windowsHide: true,
@@ -264,6 +280,14 @@ function startGoProcess() {
         const telemetry = JSON.parse(jsonStr);
         // Forward to renderer process
         mainWindow?.webContents.send('knots:telemetry', telemetry);
+
+        // Smart Split route telemetry handler
+        if (telemetry.type === 'smart-route') {
+          mainWindow?.webContents.send('knots:smartSplitTelemetry', { engine: 'social', ...telemetry });
+          if (telemetry.route_type === 'social-vpn' && telemetry.sni) {
+            handleSocialRouteEvent(telemetry.sni).catch(() => {});
+          }
+        }
         return;
       }
 
@@ -333,7 +357,80 @@ function stopEngineProcess() {
 }
 
 // =========================================================================
-// WIREGUARD — Windows hizmeti (WireGuardTunnel$<ism>) yönetimi
+// SMART SPLIT TUNNELING — İki Ayrı Motor Mimarisi
+//
+// 1. Motor (goProcess): Normal DPI Bypass Motoru (Kullanıcı arayüzünden başlatılan, bağımsız çalışan)
+// 2. Motor (goGameProcess): VPN Eşlikçi Motoru (k_main.exe --mode=game-bypass)
+//    - WireGuard VPN aktifken çalışır.
+//    - WinDivert priority=10 ile izole çalışır (1. motor ile filtre/paket çakışması yaşamaz).
+//    - Sosyal medya & normal web trafiği WireGuard tüneliyle şifrelenirken (IP gizleme),
+//      oyun paketlerini (classifier.go listesi) yakalayıp DPI bypass uygular ve 0 ms gecikmeyle geçirir.
+// =========================================================================
+
+function startSmartSplitEngines() {
+  if (smartSplitEnabled && goGameProcess && !goGameProcess.killed) return;
+  smartSplitEnabled = true;
+
+  console.log('[SmartSplit] 2. Motor (VPN ile birlikte çalışan Oyun DPI Motoru) başlatılıyor...');
+
+  const methodId = appSettingsMemory.encryptionMethod || 1;
+  const adblockFlag = `--adblock=${appSettingsMemory.adblock ? 'true' : 'false'}`;
+
+  if (!goGameProcess || goGameProcess.killed) {
+    goGameProcess = spawn(GO_ENGINE_PATH, [
+      `--method=${methodId}`,
+      adblockFlag,
+      '--mode=game-bypass',
+      '--sni-split',
+      '--global=true',
+    ], { cwd: BACKEND_DIR, env: { ...process.env }, windowsHide: true });
+
+    goGameReadLine = readline.createInterface({ input: goGameProcess.stdout, terminal: false });
+
+    goGameReadLine.on('line', (line) => {
+      try {
+        if (line.startsWith('TELEMETRY:')) {
+          const tel = JSON.parse(line.substring(10));
+          mainWindow?.webContents.send('knots:smartSplitTelemetry', { engine: 'game', ...tel });
+          return;
+        }
+      } catch {
+        console.log(`[GoVPNCompanion-STDOUT] ${line}`);
+      }
+    });
+
+    goGameProcess.stderr.on('data', (d) => console.error(`[GoVPNCompanion-STDERR] ${d.toString().trim()}`));
+    goGameProcess.on('close', (code) => {
+      console.log(`[SmartSplit] 2. Motor (VPN eşlikçi) kapandı (kod: ${code})`);
+      goGameProcess = null;
+      goGameReadLine = null;
+    });
+  }
+}
+
+function stopSmartSplitEngines() {
+  smartSplitEnabled = false;
+  if (goGameProcess) {
+    try { goGameProcess.kill('SIGTERM'); } catch {}
+    goGameProcess = null;
+    try { goGameReadLine?.close(); } catch {}
+    goGameReadLine = null;
+  }
+  console.log('[SmartSplit] 2. Motor (VPN eşlikçi) durduruldu.');
+}
+
+// handleSocialRouteEvent, sosyal medya SNI tespitinde WireGuard route tablosunu günceller.
+// Daha önce aynı SNI için route eklendiyse tekrar eklemez (set tabanlı önlem).
+const socialRouteCache = new Set();
+async function handleSocialRouteEvent(sni) {
+  if (!sni || socialRouteCache.has(sni)) return;
+  socialRouteCache.add(sni);
+  // Basit DNS → IP çözümü ve WireGuard interface'ine route ekleme
+  // Not: Gerçek implementasyon için dns.lookup + route.exe kullanılır.
+  // Şimdilik telemetri loglanır; WG tüneli zaten tüm sosyal trafiği kapsar.
+  console.log(`[SmartSplit] Sosyal medya SNI tespit edildi: ${sni} → WireGuard route aktif`);
+}
+
 // Uygulama admin (requireAdministrator) olarak çalıştığı için sc.exe
 // çağrıları yetki sorunu yaşamaz. Tunnel kapalıyken Knots'un kendi Go
 // DPI motoru çalışmaya devam eder; toggle açılınca tam tünel devreye girer.
@@ -428,6 +525,19 @@ function terminateEnginesForUpdate() {
       try { goReadLine.close(); } catch {}
       try { goReadLine.removeAllListeners?.(); } catch {}
       goReadLine = null;
+    }
+    if (goGameProcess) {
+      try { goGameProcess.kill('SIGKILL'); } catch {}
+      goGameProcess = null;
+    }
+    if (goGameReadLine) {
+      try { goGameReadLine.close(); } catch {}
+      try { goGameReadLine.removeAllListeners?.(); } catch {}
+      goGameReadLine = null;
+    }
+    if (goSocialProcess) {
+      try { goSocialProcess.kill('SIGKILL'); } catch {}
+      goSocialProcess = null;
     }
     if (pythonProcess) {
       try { pythonProcess.kill('SIGKILL'); } catch {}
@@ -559,6 +669,7 @@ async function clearSplitRoutes() {
     await runRouteCommand('delete', ip);
   }
   activeSplitRoutes.clear();
+  socialRouteCache.clear();
 }
 
 function clearSplitRoutesSync() {
@@ -568,6 +679,7 @@ function clearSplitRoutesSync() {
     } catch {}
   }
   activeSplitRoutes.clear();
+  socialRouteCache.clear();
 }
 
 function startSplitMonitor() {
@@ -621,31 +733,37 @@ async function setOperatingMode(targetMode) {
   console.log(`[Electron] Çalışma modu değiştiriliyor: ${targetMode}`);
 
   if (targetMode === 'gaming') {
+    // 1. SADECE DPI MOTORU (VPN KAPALI)
     stopSplitMonitor();
+    stopSmartSplitEngines();
     await clearSplitRoutes();
     await wgSetEnabled(false);
     appSettingsMemory.wireguardEnabled = false;
     currentEngineMode = 'go';
     startGoProcess();
-    return { success: true, mode: 'gaming', message: 'Oyun Modu aktif (DPI Bypass - 0 ms gecikme)' };
+    return { success: true, mode: 'gaming', message: 'Oyun Modu aktif (Sadece DPI Bypass - 0 ms ek gecikme)' };
   }
 
   if (targetMode === 'privacy') {
+    // 2. SADECE TEK VPN (DPI MOTORLARI KAPALI)
     stopSplitMonitor();
+    stopSmartSplitEngines();
     await clearSplitRoutes();
+    stopEngineProcess(); // Ana DPI motorunu durdur — sadece VPN tüneli kalsın
     await wgSetEnabled(true);
     appSettingsMemory.wireguardEnabled = true;
-    return { success: true, mode: 'privacy', message: 'Gizlilik Modu aktif (Tam WireGuard tüneli)' };
+    return { success: true, mode: 'privacy', message: 'Gizlilik Modu aktif (Yalnızca WireGuard VPN - Tam IP Gizliliği)' };
   }
 
   if (targetMode === 'hybrid') {
-    currentEngineMode = 'go';
-    startGoProcess();
+    // 3. AKILLI HİBRİT: VPN + 2. OYUN DPI MOTORU BİRLİKTE
+    stopEngineProcess(); // 1. bağımsız motoru kapat
     await wgSetEnabled(true);
     appSettingsMemory.wireguardEnabled = true;
+    startSmartSplitEngines(); // 2. motoru (Oyun DPI bypass) başlat
     await applySplitRoutes();
     startSplitMonitor();
-    return { success: true, mode: 'hybrid', message: 'Akıllı Hibrit Mod aktif (Oyunlar 0 ms, Web Korumalı)' };
+    return { success: true, mode: 'hybrid', message: 'Akıllı Hibrit Mod aktif (Sosyal Medya VPN + Oyunlar 2. DPI Motoru)' };
   }
 }
 
@@ -1034,6 +1152,12 @@ ipcMain.handle('knots:getSplitSettings', async () => {
     operatingMode: appSettingsMemory.operatingMode || 'hybrid',
     activeRoutesCount: activeSplitRoutes.size,
     physicalGateway: physicalGatewayCache || '192.168.1.1',
+    // Smart Split durumu
+    smartSplit: {
+      enabled: smartSplitEnabled,
+      gameEngineRunning: goGameProcess !== null,
+      socialEngineRunning: goSocialProcess !== null,
+    },
   };
 });
 
@@ -1055,6 +1179,55 @@ ipcMain.handle('knots:updateSplitSettings', async (_e, settings) => {
 
 ipcMain.handle('knots:setOperatingMode', async (_e, mode) => {
   return await setOperatingMode(mode);
+});
+
+// =========================================================================
+// SMART SPLIT TUNNELING IPC — Otomatik oyun/sosyal medya trafik yönlendirme
+// =========================================================================
+
+/** Smart Split'i etkinleştirir: WireGuard'ı (VPN) ve 2. Motoru (Oyun DPI motoru) birlikte çalıştırır */
+ipcMain.handle('knots:enableSmartSplit', async () => {
+  try {
+    // 1. WireGuard VPN tünelini aç (sosyal medya ve genel gizlilik için)
+    await wgSetEnabled(true);
+    appSettingsMemory.wireguardEnabled = true;
+
+    // 2. 2. Motoru (Oyun DPI eşlikçi motoru) başlat
+    startSmartSplitEngines();
+    appSettingsMemory.smartSplitEnabled = true;
+    saveAppSettings();
+
+    console.log('[SmartSplit] WireGuard VPN ve 2. Motor (Oyun DPI) birlikte başlatıldı.');
+    return { success: true, message: 'Smart Split Tunneling aktif: Oyunlar 2. Motorla DPI bypass, Sosyal Medya VPN tünelinde.' };
+  } catch (err) {
+    console.error('[SmartSplit] Etkinleştirme hatası:', err.message);
+    return { success: false, message: err.message };
+  }
+});
+
+/** Smart Split'i devre dışı bırakır: 2. Motoru durdurur */
+ipcMain.handle('knots:disableSmartSplit', async () => {
+  try {
+    stopSmartSplitEngines();
+    appSettingsMemory.smartSplitEnabled = false;
+    saveAppSettings();
+
+    console.log('[SmartSplit] 2. Motor durduruldu.');
+    return { success: true, message: 'Smart Split Tunneling devre dışı bırakıldı.' };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+});
+
+/** Smart Split durumunu sorgular. */
+ipcMain.handle('knots:getSmartSplitStatus', async () => {
+  return {
+    enabled: smartSplitEnabled,
+    gameEngineRunning: goGameProcess !== null && !goGameProcess.killed,
+    socialEngineRunning: appSettingsMemory.wireguardEnabled,
+    wireguardRunning: appSettingsMemory.wireguardEnabled,
+    socialRoutesCached: socialRouteCache.size,
+  };
 });
 
 ipcMain.handle('knots:getRunningProcesses', async () => {
@@ -1993,7 +2166,7 @@ app.whenReady().then(() => {
       { type: 'separator' },
       { label: 'Mini Mode (Küçük kare)', click: () => { showMainWindow(); if (mainWindow) mainWindow.webContents.send('knots:miniMode', { active: true }); } },
       { type: 'separator' },
-      { label: 'Çıkış (motoru da kapat)', click: () => { trayQuitFromMenu = true; stopSplitMonitor(); clearSplitRoutesSync(); stopEngineProcess(); app.quit(); } },
+      { label: 'Çıkış (motoru da kapat)', click: () => { trayQuitFromMenu = true; stopSplitMonitor(); clearSplitRoutesSync(); stopEngineProcess(); stopSmartSplitEngines(); app.quit(); } },
     ]);
     tray.setToolTip('Knots Connect');
     tray.setContextMenu(trayMenu);
@@ -2033,5 +2206,13 @@ app.on('window-all-closed', (e) => {
   stopSplitMonitor();
   clearSplitRoutesSync();
   stopEngineProcess();
+  stopSmartSplitEngines();
   app.quit();
+});
+
+app.on('will-quit', () => {
+  stopSplitMonitor();
+  clearSplitRoutesSync();
+  stopEngineProcess();
+  stopSmartSplitEngines();
 });

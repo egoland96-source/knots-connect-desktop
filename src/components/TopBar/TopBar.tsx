@@ -1,14 +1,16 @@
 import React, { useCallback, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useConnectionStore } from '../../store/connectionStore';
-import { Minus, Square, X, MapPin, Bell, Settings, Box } from 'lucide-react';
+import { useNavStore } from '../../store/navStore';
+import { useTranslation } from '../../store/languageStore';
+import { Minus, Square, X, MapPin, Bell, Settings, Box, Globe } from 'lucide-react';
 
 const SERVERS: { id: string; name: string }[] = [
   { id: 'nl', name: 'Netherlands · Amsterdam' },
-  { id: 'us', name: 'USA · New York' },
+  { id: 'wg-us', name: 'USA · Secaucus' },
   { id: 'de', name: 'Germany · Frankfurt' },
+  { id: 'fi', name: 'Finland · Helsinki' },
   { id: 'jp', name: 'Japan · Tokyo' },
-  { id: 'fr', name: 'France · Paris' },
   { id: 'gb', name: 'UK · London' },
 ];
 
@@ -40,14 +42,17 @@ const LiveClock: React.FC = () => {
 };
 
 export const TopBar = React.memo(() => {
+  const { t, language, setLanguage } = useTranslation();
+  const navigate = useNavStore((s) => s.navigate);
   // Read from store - no timers, no local state for connection data
   const status = useConnectionStore((s) => s.status);
   const uptimeSeconds = useConnectionStore((s) => s.uptimeSeconds);
-  const [server, setServer] = useState('nl');
+  const serverId = useConnectionStore((s) => s.serverId);
+  const setServerId = useConnectionStore((s) => s.setServerId);
   const [open, setOpen] = useState(false);
 
-  const handleMinimize = useCallback(() => window.windowControls.minimize(), []);
-  const handleMaximize = useCallback(() => window.windowControls.maximize(), []);
+  const handleMinimize = useCallback(() => window.windowControls?.minimize?.(), []);
+  const handleMaximize = useCallback(() => window.windowControls?.maximize?.(), []);
   const handleClose = useCallback(() => {
     // Varsayılan davranış: pencereyi gizle, arka planda çalışmaya devam et (system tray)
     window.windowControls?.hideToTray?.();
@@ -55,10 +60,10 @@ export const TopBar = React.memo(() => {
   const handleEnterMini = useCallback(() => window.windowControls?.enterMini?.(), []);
 
   const isConnected = status === 'connected';
-  const statusLabel = isConnected ? 'Connected' : status === 'connecting' ? 'Connecting…' : 'Disconnected';
+  const statusLabel = isConnected ? t('common.connected') : status === 'connecting' ? t('common.connecting') : t('common.disconnected');
   const statusColor = isConnected ? 'var(--success)' : status === 'connecting' ? 'var(--accent)' : 'var(--text-muted)';
 
-  const selected = SERVERS.find((s) => s.id === server);
+  const selected = SERVERS.find((s) => s.id === (serverId || 'nl')) || SERVERS[0];
 
   return (
     <div
@@ -114,7 +119,7 @@ export const TopBar = React.memo(() => {
           }}
         >
           <MapPin size={14} strokeWidth={2} color="var(--accent)" />
-          {selected?.name ?? 'Select Server'}
+          {selected?.name ?? t('topbar.selectServer')}
         </button>
 
         {open && (
@@ -139,7 +144,7 @@ export const TopBar = React.memo(() => {
               <button
                 key={s.id}
                 onClick={() => {
-                  setServer(s.id);
+                  setServerId(s.id);
                   setOpen(false);
                 }}
                 style={{
@@ -148,10 +153,10 @@ export const TopBar = React.memo(() => {
                   padding: '9px 12px',
                   borderRadius: 'var(--radius-sm)',
                   border: 'none',
-                  background: server === s.id ? 'rgba(28,200,255,0.12)' : 'transparent',
-                  color: server === s.id ? 'var(--accent)' : 'var(--text-secondary)',
+                  background: (serverId || 'nl') === s.id ? 'rgba(28,200,255,0.12)' : 'transparent',
+                  color: (serverId || 'nl') === s.id ? 'var(--accent)' : 'var(--text-secondary)',
                   fontSize: 13,
-                  fontWeight: server === s.id ? 600 : 400,
+                  fontWeight: (serverId || 'nl') === s.id ? 600 : 400,
                   cursor: 'pointer',
                   transition: 'background 150ms var(--ease)',
                 }}
@@ -165,31 +170,11 @@ export const TopBar = React.memo(() => {
 
       {/* SAĞ: Notifications + Quick Settings + Süre + pencere kontrolleri */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flex: 1, justifyContent: 'flex-end' }}>
-        {/* Notifications */}
-        <button
-          aria-label="Notifications"
-          style={{
-            width: 30,
-            height: 30,
-            borderRadius: 8,
-            border: 'none',
-            background: 'transparent',
-            color: 'var(--text-muted)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-            transition: 'background 150ms var(--ease), color 150ms var(--ease)',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; e.currentTarget.style.color = 'var(--text-primary)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)'; }}
-        >
-          <Bell size={14} strokeWidth={2} />
-        </button>
-
         {/* Quick Settings */}
         <button
+          onClick={() => navigate('settings')}
           aria-label="Quick Settings"
+          title={t('nav.settings')}
           style={{
             width: 30,
             height: 30,
@@ -209,9 +194,35 @@ export const TopBar = React.memo(() => {
           <Settings size={14} strokeWidth={2} />
         </button>
 
+        {/* Language Switcher */}
+        <button
+          onClick={() => setLanguage(language === 'tr' ? 'en' : 'tr')}
+          title={language === 'tr' ? "Switch language to English" : "Türkçe'ye geç"}
+          style={{
+            height: 26,
+            padding: '0 8px',
+            borderRadius: 6,
+            border: '1px solid var(--glass-card-border, #1E2D38)',
+            background: 'var(--glass-card-bg-light, #111D26)',
+            color: 'var(--text-primary, #EEF4F5)',
+            fontSize: 11,
+            fontWeight: 700,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            cursor: 'pointer',
+            transition: 'border-color 150ms ease, background 150ms ease',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--accent, #58BFD2)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--glass-card-border, #1E2D38)'; }}
+        >
+          <span style={{ fontSize: 12 }}>{language === 'tr' ? '🇹🇷' : '🇬🇧'}</span>
+          <span>{language === 'tr' ? 'TR' : 'EN'}</span>
+        </button>
+
         {/* Session Duration — canlı HH:mm:ss */}
         <span style={{ fontSize: 13, fontFamily: 'monospace', color: 'var(--text-muted)', letterSpacing: '0.4px' }}>
-          {formatUptime(useConnectionStore((s) => s.uptimeSeconds))}
+          {formatUptime(uptimeSeconds)}
         </span>
         {/* Canlı sistem saati HH:mm:ss */}
         <LiveClock />

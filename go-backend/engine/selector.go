@@ -1,3 +1,5 @@
+//go:build ignore
+
 // selector.go — uyumlu stratejileri Health skoruna göre sıralar ve en iyisini seçer.
 //
 // Kural: "A -> başarısız ise B'ye geç; B birkaç kez başarısız ise C stabil ise C'ye geç."

@@ -1,3 +1,5 @@
+//go:build ignore
+
 // state.go — kalıcı öğrenme: ağ profili başına strateji geçmişi.
 //
 // Kullanıcının fikri: "ISS / network profile → strategy history → son başarılı

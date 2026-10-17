@@ -1,3 +1,5 @@
+//go:build ignore
+
 // strat_splitv.go — GoodbyeDPI "-k" tarzı SNI-gizleyen parçalama stratejisi.
 //
 // split2 SNI'nin ÖNÜNDEN bölüyor: ikinci parçada full SNI hostname'i tek

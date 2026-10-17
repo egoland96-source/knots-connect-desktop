@@ -1,3 +1,5 @@
+//go:build ignore
+
 // strat_fake.go — FAKE_PACKET sistemi: DPI'ı yanıltan sahte paketler.
 //
 // Yöntem (GoodbyeDPI "fake" + window-min felsefesinin sertleştirilmiş hali):

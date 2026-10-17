@@ -1,3 +1,5 @@
+//go:build ignore
+
 // discord_fake.go — Discord (ve Cloudflare öncesi) hedeflerine özel strateji.
 //
 // Neden ayrı: Discord'un gateway/CDN edge'i (Cloudflare 162.159.x.x) splitv'nin

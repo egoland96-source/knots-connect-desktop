@@ -1,3 +1,5 @@
+//go:build ignore
+
 // strategy.go —  Adaptive Network Engine'in strateji soyutlaması.
 //
 // Her strateji bir Strategy interface'i uygular: hangi protokolleri / IP

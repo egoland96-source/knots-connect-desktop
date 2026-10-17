@@ -1,3 +1,4 @@
+
 // packet_util.go — parçalama stratejilerinin kullandığı ortak IP/TCP
 // checksum ve fragman yardımcıları. Orijinal go_main.go'dan taşındı.
 package main
@@ -12,25 +13,31 @@ import (
 	"knots-go-backend/engine"
 )
 
-// chooseSplitPoint, SNI extension'ının BAŞLANGICINDAN ÖNCE sabitlenen bölünme
-// noktası seçer (-6..+2 bayt). Amaç: hiçbir parçada SNI hostname'i tam olarak
-// görünmesin; parça1 TLS başlığı+ClientHello öncesini, parça2 SNI'yi içerir.
+// chooseSplitPoint, SNI hostname'i ORTASINDAN KESMEZ. ClientHello'yu
+// SNI'dan SONRA veya ÖNCE bölmek yerine, SNI'nın TAMAMI tek parçada
+// kalacak şekilde bölünme noktası seçer. Amaç: CDN (Cloudflare/Akamai)
+// SNI'yi tam görsün, doğru sertifika dönsün; DPI replike edemesin.
+// hostnameRange'den (start, length) kullanır, yanlış 0x00 0x00 aramaları
+// yerine doğru RFC 8446 parse'ı yapar.
 func chooseSplitPoint(payload []byte) int {
-	length := len(payload)
-	sniOffset := findApproxSNIOffset(payload)
+	sniStart, sniLen, ok := findSniHostnameRange(payload)
 
 	var point int
-	if sniOffset > 30 && sniOffset < length-30 {
-		point = sniOffset - 6 + rand.Intn(8)
+	if ok && sniLen > 4 {
+		// SNI hostname bölgesinin ORTASINDAN (ya da yakınından) böl —
+		// hiçbir tek parça tam hostname'i taşımaz, DPI eşleştirme kırılır.
+		point = sniStart + rand.Intn(sniLen)
+	} else if ok && sniLen > 0 {
+		point = sniStart
 	} else {
-		point = length / 3
+		point = len(payload) / 3
 	}
 
 	if point < 16 {
 		point = 16
 	}
-	if point > length-16 {
-		point = length - 16
+	if point > len(payload)-16 {
+		point = len(payload) - 16
 	}
 	return point
 }

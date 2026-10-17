@@ -117,6 +117,24 @@ export interface KnotsBridgeApi {
   addBypassApp?: (appName: string) => Promise<any>;
   removeBypassApp?: (appName: string) => Promise<any>;
 
+  // === SMART SPLIT — Otomatik oyun/sosyal medya yönlendirme ===
+  enableSmartSplit?: () => Promise<{ success: boolean; message?: string }>;
+  disableSmartSplit?: () => Promise<{ success: boolean; message?: string }>;
+  getSmartSplitStatus?: () => Promise<{
+    enabled: boolean;
+    gameEngineRunning: boolean;
+    socialEngineRunning: boolean;
+    wireguardRunning: boolean;
+    socialRoutesCached: number;
+  } | null>;
+  onSmartSplitTelemetry?: (callback: (data: {
+    engine: 'game' | 'social';
+    type?: string;
+    sni?: string;
+    route_type?: string;
+    [key: string]: any;
+  }) => void) => () => void;
+
   // === PRIVACY PROTECTION ===
   privacy?: PrivacyBridgeApi;
 

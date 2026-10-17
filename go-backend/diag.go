@@ -1,3 +1,5 @@
+//go:build ignore
+
 // diag.go — --diag bayrağıyla çalışan teşhis modu.
 // WinDivertRecv neden çöp pRecvLen üretiyor sorusunu yanıtlar:
 //   - hangi WinDivert.dll yüklendi (modül yolu)

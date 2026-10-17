@@ -17,6 +17,7 @@ import {
 import { Card, Badge, Button } from '../../components/ui';
 import { useAuthStore } from '../../store/authStore';
 import type { SubscriptionPlan } from '../../types/auth.types';
+import { useTranslation } from '../../store/languageStore';
 
 const DEVICES = [
   { icon: Laptop, name: 'Windows Workstation', detail: 'WinDivert Native · Online', active: true },
@@ -36,321 +37,379 @@ const PLANS: { key: SubscriptionPlan; name: string; price: string; note: string 
 ];
 
 export const Account: React.FC = () => {
-  const [showKey, setShowKey] = useState(false);
-  const [savingPlan, setSavingPlan] = useState(false);
+  const { t } = useTranslation();
   const user = useAuthStore((s) => s.user);
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-  const token = useAuthStore((s) => s.accessToken);
-  const loadProfile = useAuthStore((s) => s.loadProfile);
-  const changeSubscription = useAuthStore((s) => s.changeSubscription);
+  const knotsCreateIdentity = useAuthStore((s) => s.knotsCreateIdentity);
+  const knotsRecover = useAuthStore((s) => s.knotsRecover);
+  const logout = useAuthStore((s) => s.logout);
 
-  useEffect(() => {
-    // Knots_ / guest_ local identities have no backend profile
-    if (isAuthenticated && token && !token.startsWith('knots_') && !token.startsWith('guest_')) {
-      loadProfile();
-    }
-  }, [isAuthenticated, token, loadProfile]);
+  const knotsId = user?.knotsIdFormatted || user?.id || '7F3A-91C2-6D84-B0E7';
+  const isPro = user?.subscriptionType === 'premium';
 
-  if (!isAuthenticated || !user) {
-    return (
-      <div style={{ width: '100%', maxWidth: 1100, margin: '0 auto', padding: 'var(--space-6)' }}>
-        <div style={{ textAlign: 'center', padding: 'var(--space-8)' }}>
-          <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)' }}>Not authenticated</h2>
-          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 8 }}>Please log in to view your account.</p>
-        </div>
-      </div>
-    );
-  }
+  const [copied, setCopied] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newIdentity, setNewIdentity] = useState<{ knotsId: string; mnemonic: string } | null>(null);
+  const [showRestoreModal, setShowRestoreModal] = useState(false);
+  const [restoreMnemonic, setRestoreMnemonic] = useState('');
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [restoreLoading, setRestoreLoading] = useState(false);
 
-  const initials = user.username
-    .split(' ')
-    .map((w) => w[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2);
+  const handleCopyId = () => {
+    navigator.clipboard?.writeText(knotsId);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
-  const isPro = user.subscriptionType !== 'free';
-  const planMeta = PLAN_META[user.subscriptionType] ?? PLAN_META.free;
-
-  const handleChangePlan = async (plan: SubscriptionPlan) => {
-    if (savingPlan || plan === user.subscriptionType) return;
-    setSavingPlan(true);
+  const handleCreateIdentity = async () => {
     try {
-      await changeSubscription(plan);
-    } catch {
-      // error surfaced via store; plan picker stays interactive
+      const res = await knotsCreateIdentity();
+      setNewIdentity(res);
+      setShowCreateModal(true);
+    } catch (e: any) {
+      alert(e?.message || 'Kimlik oluşturulamadı.');
+    }
+  };
+
+  const handleRestoreIdentity = async () => {
+    if (!restoreMnemonic.trim()) return;
+    setRestoreLoading(true);
+    setRestoreError(null);
+    try {
+      await knotsRecover(restoreMnemonic.trim());
+      setShowRestoreModal(false);
+      setRestoreMnemonic('');
+    } catch (e: any) {
+      setRestoreError(e?.message || 'Geçersiz kurtarma anahtarı.');
     } finally {
-      setSavingPlan(false);
+      setRestoreLoading(false);
     }
   };
 
   return (
-    <div style={{ width: '100%', maxWidth: 1100, margin: '0 auto' }}>
-      <div style={{ marginBottom: 'var(--space-5)' }}>
-        <h2 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.3px' }}>Account</h2>
-        <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>Manage your profile, subscription and devices</p>
+    <div style={{ maxWidth: 1040, margin: '0 auto', width: '100%', padding: '0 8px' }}>
+      {/* Header */}
+      <div style={{ marginBottom: 28 }}>
+        <div style={{ fontSize: 24, fontWeight: 700, color: '#EEF4F5', letterSpacing: '-0.02em' }}>
+          {t('account.title')}
+        </div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#7E949F', letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: 4 }}>
+          {t('account.subtitle')}
+        </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(280px, 0.6fr)', gap: 'var(--space-4)', alignItems: 'start' }}>
-        {/* SOL KOLON */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-          {/* PROFİL KARTI */}
-          <Card padding="var(--space-6)">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-5)' }}>
-              <motion.div
-                whileHover={{ scale: 1.04 }}
+      {/* Knots ID Section */}
+      <div style={{ marginBottom: 32 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#7E949F', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+          {t('account.knotsId')}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 8 }}>
+          <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "'DM Mono', monospace", color: '#EEF4F5', letterSpacing: '0.04em' }}>
+            {knotsId}
+          </div>
+          <button
+            onClick={handleCopyId}
+            style={{
+              padding: '4px 10px',
+              borderRadius: 6,
+              background: '#18333D',
+              border: '1px solid #29404B',
+              color: copied ? '#61D1A8' : '#58BFD2',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            {copied ? t('account.copied') : t('account.copyId')}
+          </button>
+        </div>
+        <div style={{ fontSize: 12, color: '#7E949F', marginTop: 6 }}>
+          {t('account.storedOnDevice')}
+        </div>
+      </div>
+
+      <div style={{ borderTop: '1px solid #1E2D38', marginBottom: 28 }} />
+
+      {/* Main Grid: Identity Actions (Left) and Account Access (Right) */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 48, marginBottom: 36 }}>
+        {/* Left Column: Identity */}
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: '#EEF4F5', marginBottom: 16 }}>
+            {t('account.identity')}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <motion.button
+              whileHover={{ x: 3 }}
+              whileTap={{ scale: 0.98 }}
+              transition={{ duration: 0.15 }}
+              onClick={handleCreateIdentity}
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '12px 0',
+                border: 'none',
+                borderBottom: '1px solid #1E2D38',
+                background: 'transparent',
+                color: '#EEF4F5',
+                fontSize: 13.5,
+                fontWeight: 500,
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+            >
+              <span>Yeni kimlik oluştur</span>
+              <span style={{ color: '#58BFD2', fontSize: 16 }}>›</span>
+            </motion.button>
+            <motion.button
+              whileHover={{ x: 3 }}
+              whileTap={{ scale: 0.98 }}
+              transition={{ duration: 0.15 }}
+              onClick={() => {
+                setRestoreError(null);
+                setShowRestoreModal(true);
+              }}
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '12px 0',
+                border: 'none',
+                borderBottom: '1px solid #1E2D38',
+                background: 'transparent',
+                color: '#EEF4F5',
+                fontSize: 13.5,
+                fontWeight: 500,
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+            >
+              <span>Kimliği geri yükle (12 Kelime)</span>
+              <span style={{ color: '#58BFD2', fontSize: 16 }}>›</span>
+            </motion.button>
+          </div>
+        </div>
+
+        {/* Right Column: Account Access */}
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#7E949F', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 16 }}>
+            {t('account.accountAccess')}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '12px 0',
+                borderBottom: '1px solid #1E2D38',
+                fontSize: 13.5,
+              }}
+            >
+              <span style={{ color: '#EEF4F5' }}>Abonelik Durumu</span>
+              <span style={{ color: isPro ? '#61D1A8' : '#7E949F', fontSize: 13, fontWeight: 600 }}>
+                {isPro ? 'Pro Aktif' : 'Ücretsiz'}
+              </span>
+            </div>
+            <motion.button
+              whileHover={{ x: 3 }}
+              whileTap={{ scale: 0.98 }}
+              transition={{ duration: 0.15 }}
+              onClick={() => logout()}
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '12px 0',
+                border: 'none',
+                borderBottom: '1px solid #1E2D38',
+                background: 'transparent',
+                color: '#ef4444',
+                fontSize: 13.5,
+                fontWeight: 500,
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+            >
+              <span>Çıkış Yap / Kimlik Değiştir</span>
+              <span style={{ color: '#ef4444', fontSize: 16 }}>›</span>
+            </motion.button>
+          </div>
+        </div>
+      </div>
+
+      {/* Privacy Explanation Surface */}
+      <div
+        style={{
+          padding: '18px 22px',
+          borderRadius: 8,
+          background: '#111D26',
+          border: '1px solid #1E2D38',
+          maxWidth: 480,
+        }}
+      >
+        <div style={{ fontSize: 13, fontWeight: 600, color: '#EEF4F5' }}>
+          {t('account.identityNote')}
+        </div>
+        <div style={{ fontSize: 12, color: '#7E949F', marginTop: 4 }}>
+          {t('account.keyNote')}
+        </div>
+      </div>
+
+      {/* Modal: New Identity Created */}
+      {showCreateModal && newIdentity && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(8, 15, 22, 0.8)',
+            backdropFilter: 'blur(4px)',
+            padding: 20,
+          }}
+          onClick={() => setShowCreateModal(false)}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 480,
+              background: '#111D26',
+              border: '1px solid #1E2D38',
+              borderRadius: 12,
+              padding: '24px 28px',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ margin: 0, color: '#61D1A8', fontSize: 18, fontWeight: 700 }}>
+              Yeni Knots Kimliği Oluşturuldu
+            </h3>
+            <p style={{ fontSize: 13, color: '#9DB0B7', marginTop: 8 }}>
+              Kurtarma anahtarınızı güvenli bir yere kaydedin. Knots sunucularında saklanmaz.
+            </p>
+            <div style={{ padding: '12px 16px', background: '#0B151D', borderRadius: 8, marginTop: 12, border: '1px solid #1E2D38' }}>
+              <div style={{ fontSize: 11, color: '#7E949F', fontWeight: 700, textTransform: 'uppercase' }}>12 Kelimelik Kurtarma Anahtarı</div>
+              <div style={{ fontSize: 13, color: '#EEF4F5', fontFamily: "'DM Mono', monospace", marginTop: 6, lineHeight: 1.6, wordBreak: 'break-word' }}>
+                {newIdentity.mnemonic}
+              </div>
+            </div>
+            <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setShowCreateModal(false)}
                 style={{
-                  width: 72,
-                  height: 72,
-                  borderRadius: 22,
-                  background: 'linear-gradient(135deg, var(--accent), #0E8FD6)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--text-inverse)',
-                  fontSize: 26,
-                  fontWeight: 700,
-                  boxShadow: '0 6px 24px rgba(61,181,255,0.3)',
-                  flexShrink: 0,
+                  padding: '8px 20px',
+                  borderRadius: 6,
+                  background: '#18333D',
+                  border: '1px solid #29404B',
+                  color: '#EEF4F5',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer',
                 }}
               >
-                {initials}
-              </motion.div>
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontSize: 19, fontWeight: 700, color: 'var(--text-primary)' }}>{user.username}</span>
-                  <Badge tone={isPro ? 'accent' : 'neutral'}>
-                    <Crown size={11} strokeWidth={2.2} /> {planMeta.label}
-                  </Badge>
-                </div>
-                <div style={{ fontSize: 13.5, color: 'var(--text-muted)', marginTop: 3 }}>{user.email}</div>
-                <div style={{ display: 'flex', gap: 8, marginTop: 'var(--space-2)' }}>
-                  <Badge tone="neutral">ID: {(user.id.match(/.{4}/g)?.join('-') ?? user.id)}</Badge>
-                <Button variant="secondary" size="sm" onClick={() => {
-                  navigator.clipboard.writeText(user.id);
-                }} icon={RefreshCw}>Kopyala</Button>
-                </div>
-              </div>
-              <Button variant="secondary" size="sm" icon={RefreshCw}>Edit</Button>
+                {t('common.done')}
+              </button>
             </div>
-          </Card>
-
-          {/* SUBSCRIPTION */}
-          <Card>
-            <SectionHeader icon={<Crown size={16} strokeWidth={2} />} title="Subscription" />
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-3)' }}>
-              <MiniStat label="Plan" value={planMeta.label} />
-              <MiniStat label="Member since" value={new Date(user.createdAt).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })} />
-              <MiniStat label="Status" value={isPro ? 'Active' : 'Free tier'} />
-            </div>
-            <div style={{ marginTop: 'var(--space-4)', paddingTop: 'var(--space-3)', borderTop: '1px solid var(--border-subtle)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, marginBottom: 8 }}>
-                <span style={{ color: 'var(--text-muted)' }}>Device limit</span>
-                <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>Up to {planMeta.devices} {planMeta.devices === 1 ? 'device' : 'devices'}</span>
-              </div>
-              <div style={{ width: '100%', height: 6, borderRadius: 99, background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: planMeta.barWidth }}
-                  transition={{ duration: 0.8, ease: 'easeOut' }}
-                  style={{ height: '100%', borderRadius: 99, background: 'linear-gradient(90deg, var(--accent), #33D4FF)' }}
-                />
-              </div>
-              {isPro && user.subscriptionExpire && (
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
-                  Renews on {new Date(user.subscriptionExpire).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })}
-                </div>
-              )}
-            </div>
-          </Card>
-
-          {/* DEVICES */}
-          <Card>
-            <SectionHeader icon={<Laptop size={16} strokeWidth={2} />} title="Devices" action={<Badge>2 connected</Badge>} />
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-              {DEVICES.map((d) => (
-                <div key={d.name} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', background: 'var(--glass-card-bg)', border: '1px solid var(--glass-card-border)', backdropFilter: 'var(--glass-card-blur)', WebkitBackdropFilter: 'var(--glass-card-blur)' }}>
-                  <span style={{ width: 36, height: 36, borderRadius: 11, background: 'rgba(28,200,255,0.1)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    <d.icon size={17} strokeWidth={1.8} />
-                  </span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-primary)' }}>{d.name}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 1 }}>{d.detail}</div>
-                  </div>
-                  {d.active ? (
-                    <Badge tone="success">Online</Badge>
-                  ) : (
-                    <Button variant="ghost" size="sm">Revoke</Button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </Card>
-
-          {/* SECURITY */}
-          <Card>
-            <SectionHeader icon={<Shield size={16} strokeWidth={2} />} title="Security" />
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', background: 'var(--glass-card-bg)', border: '1px solid var(--glass-card-border)', backdropFilter: 'var(--glass-card-blur)', WebkitBackdropFilter: 'var(--glass-card-blur)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <KeyRound size={17} strokeWidth={1.8} color="var(--accent)" />
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Access Token</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'monospace', marginTop: 2 }}>
-                      {showKey ? 'sec_live_99824_k7x_windivert_f839a' : '••••••••••••••••••••••••••••'}
-                    </div>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setShowKey(!showKey)}
-                  style={{ width: 34, height: 34, borderRadius: 9, border: 'none', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 150ms var(--ease)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                >
-                  {showKey ? <EyeOff size={16} strokeWidth={2} /> : <Eye size={16} strokeWidth={2} />}
-                </button>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: 'var(--space-2) 0', fontSize: 13 }}>
-                <span style={{ color: 'var(--text-muted)' }}>Encryption</span>
-                <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>Ed25519 / Curve</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: 'var(--space-2) 0', fontSize: 13 }}>
-                <span style={{ color: 'var(--text-muted)' }}>Token Status</span>
-                <span style={{ color: 'var(--success)', fontWeight: 600 }}>Active</span>
-              </div>
-            </div>
-          </Card>
+          </div>
         </div>
+      )}
 
-        {/* SAĞ PANEL - Daha yakın spacing */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-          {/* PAYMENT */}
-          <Card>
-            <SectionHeader icon={<CreditCard size={16} strokeWidth={2} />} title="Payment" />
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', background: 'var(--glass-card-bg)', border: '1px solid var(--glass-card-border)', backdropFilter: 'var(--glass-card-blur)', WebkitBackdropFilter: 'var(--glass-card-blur)' }}>
-              <div style={{ width: 42, height: 28, borderRadius: 6, background: 'linear-gradient(135deg, #111827, #1F2937)', border: '1px solid var(--border-strong)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '0.5px' }}>••••</span>
+      {/* Modal: Restore Identity */}
+      {showRestoreModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(8, 15, 22, 0.8)',
+            backdropFilter: 'blur(4px)',
+            padding: 20,
+          }}
+          onClick={() => setShowRestoreModal(false)}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 480,
+              background: '#111D26',
+              border: '1px solid #1E2D38',
+              borderRadius: 12,
+              padding: '24px 28px',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ margin: 0, color: '#EEF4F5', fontSize: 18, fontWeight: 700 }}>
+              Kimliği Geri Yükle
+            </h3>
+            <p style={{ fontSize: 13, color: '#9DB0B7', marginTop: 8 }}>
+              12 kelimelik kurtarma anahtarınızı aralarında boşluk bırakarak girin.
+            </p>
+            <textarea
+              value={restoreMnemonic}
+              onChange={(e) => setRestoreMnemonic(e.target.value)}
+              placeholder="kelime1 kelime2 kelime3..."
+              rows={3}
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                borderRadius: 8,
+                border: '1px solid #1E2D38',
+                background: '#0B151D',
+                color: '#EEF4F5',
+                fontSize: 13,
+                fontFamily: "'DM Mono', monospace",
+                marginTop: 12,
+                resize: 'none',
+              }}
+            />
+            {restoreError && (
+              <div style={{ color: '#ef4444', fontSize: 12, marginTop: 8 }}>
+                {restoreError}
               </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Visa ending 4242</div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Expires 08/2028</div>
-              </div>
-              <Badge tone="success">Active</Badge>
+            )}
+            <div style={{ marginTop: 20, display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setShowRestoreModal(false)}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 6,
+                  background: 'transparent',
+                  border: '1px solid #1E2D38',
+                  color: '#7E949F',
+                  fontSize: 13,
+                  cursor: 'pointer',
+                }}
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                onClick={handleRestoreIdentity}
+                disabled={restoreLoading}
+                style={{
+                  padding: '8px 20px',
+                  borderRadius: 6,
+                  background: 'linear-gradient(135deg, #287FB9, #4FB9CF)',
+                  border: 'none',
+                  color: '#EEF4F5',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: restoreLoading ? 'wait' : 'pointer',
+                }}
+              >
+                {restoreLoading ? t('common.loading') : 'Geri Yükle'}
+              </button>
             </div>
-            <Button variant="secondary" size="sm" full style={{ marginTop: 'var(--space-3)' }} icon={CreditCard}>Manage Payment</Button>
-          </Card>
-
-          {/* QUICK ACTIONS */}
-          <Card>
-            <SectionHeader icon={<User size={16} strokeWidth={2} />} title="Quick Actions" />
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 'var(--space-2)' }}>
-              <QuickAction icon={RefreshCw} label="Change Key" />
-              <QuickAction icon={HelpCircle} label="Support" />
-              <QuickAction icon={Trash2} label="Purge Data" danger />
-            </div>
-          </Card>
-
-          {/* PLAN SEÇİCİ */}
-          <Card style={{ background: 'linear-gradient(135deg, rgba(28,200,255,0.08), rgba(14,143,214,0.05))', border: '1px solid rgba(28,200,255,0.2)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 'var(--space-3)' }}>
-              <Crown size={18} strokeWidth={2} color="var(--accent)" />
-              <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>Choose your plan</span>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {PLANS.map((p) => {
-                const isCurrent = user.subscriptionType === p.key;
-                return (
-                  <div
-                    key={p.key}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 12,
-                      padding: 'var(--space-3)',
-                      borderRadius: 'var(--radius-md)',
-                      background: isCurrent ? 'rgba(28,200,255,0.1)' : 'var(--glass-card-bg)',
-                      border: `1px solid ${isCurrent ? 'rgba(28,200,255,0.45)' : 'var(--glass-card-border)'}`,
-                      backdropFilter: 'var(--glass-card-blur)',
-                      WebkitBackdropFilter: 'var(--glass-card-blur)',
-                    }}
-                  >
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                        <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-primary)' }}>{p.name}</span>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)' }}>{p.price}</span>
-                      </div>
-                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 1 }}>{p.note} · {PLAN_META[p.key].devices} devices</div>
-                    </div>
-                    {isCurrent ? (
-                      <Badge tone="accent">Active</Badge>
-                    ) : (
-                      <Button variant={p.key === 'premium' ? 'primary' : 'secondary'} size="sm" disabled={savingPlan} onClick={() => handleChangePlan(p.key)}>
-                        {savingPlan ? '...' : 'Choose'}
-                      </Button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-            <div style={{ marginTop: 'var(--space-3)', paddingTop: 'var(--space-3)', borderTop: '1px solid var(--border-subtle)' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {planMeta.benefits.map((f) => (
-                  <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: 'var(--text-secondary)' }}>
-                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--success)', flexShrink: 0 }} />
-                    {f}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </Card>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };
-
-const SectionHeader: React.FC<{ icon: React.ReactNode; title: string; action?: React.ReactNode }> = ({ icon, title, action }) => (
-  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-3)' }}>
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-      <span style={{ width: 32, height: 32, borderRadius: 10, background: 'rgba(28,200,255,0.1)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        {icon}
-      </span>
-      <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{title}</span>
-    </div>
-    {action}
-  </div>
-);
-
-const MiniStat: React.FC<{ label: string; value: string }> = ({ label, value }) => (
-  <div style={{ padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', background: 'var(--glass-card-bg)', border: '1px solid var(--glass-card-border)', backdropFilter: 'var(--glass-card-blur)', WebkitBackdropFilter: 'var(--glass-card-blur)' }}>
-    <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: '0.5px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>{label}</div>
-    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', marginTop: 4 }}>{value}</div>
-  </div>
-);
-
-const QuickAction: React.FC<{ icon: React.ComponentType<any>; label: string; danger?: boolean }> = ({ icon: Icon, label, danger }) => (
-  <motion.button
-    whileHover={{ y: -2 }}
-    transition={{ duration: 0.15 }}
-    style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      gap: 8,
-      padding: 'var(--space-3)',
-      borderRadius: 'var(--radius-md)',
-      background: 'var(--glass-card-bg)',
-      backdropFilter: 'var(--glass-card-blur)',
-      WebkitBackdropFilter: 'var(--glass-card-blur)',
-      border: `1px solid ${danger ? 'rgba(239,68,68,0.2)' : 'var(--glass-card-border)'}`,
-      color: danger ? 'var(--danger)' : 'var(--text-muted)',
-      cursor: 'pointer',
-      transition: 'background 150ms var(--ease), color 150ms var(--ease), border-color 150ms var(--ease)',
-    }}
-  >
-    <Icon size={18} strokeWidth={1.9} />
-    <span style={{ fontSize: 11.5, fontWeight: 600 }}>{label}</span>
-  </motion.button>
-);
-
 export default Account;

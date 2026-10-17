@@ -1,4 +1,3 @@
-// blacklist.go — blacklist.txt'i yükler ve SNI eşleştirmesi yapar.
 // Python engine/blacklist.py'nin tam Go karşılığıdır.
 // Contains eşleştirme: *.roblox.com normalize edilir; "roblox.com" kuralı
 // api.roblox.com / games.roblox.com / sea1-...-123.roblox.com'u yakalar.
@@ -66,17 +65,13 @@ func LoadBlacklist() []string {
 }
 
 // webApiRobloxHost, DPI tarafından boğulmadığı kanıtlanmış (arayüz çalışıyor)
-// saf web API hostlarını işaretler. Bunları bölmek zararlıdır: join API seli
-// (ecsv2/ephemeralcounters/apis) 8-12 sn'lik timeout'larla tıkanır ve oyun
-// join'i tamamlanmaz. Passthrough'a bırakılırlar — web zaten filtresiz akar.
+// saf web API hostlarını işaretler. games.roblox.com BURADA DEĞİLDİR —
+// o gerçekten oyun sunucusudur ve DPI müdahalesine tabidir; bypass edilmesi
+// GEREKIR.
 func webApiRobloxHost(sni string) bool {
-	if strings.HasSuffix(sni, ".api.roblox.com") {
-		return true
-	}
-	switch sni {
-	case "apis.roblox.com", "api.roblox.com", "games.roblox.com", "game.roblox.com", "gamejoin.roblox.com":
-		return true
-	}
+	// Roblox oyun domainleri (games.roblox.com, api.roblox.com, apis.roblox.com,
+	// gamejoin.roblox.com, game.roblox.com) artık bypass dışında bırakılmıyor;
+	// tümü DPI müdahalesine tabi, split/bypass uygulanacak.
 	return false
 }
 
@@ -85,7 +80,8 @@ func webApiRobloxHost(sni string) bool {
 // / "sea1-....roblox.com" SNI'larını yakalar ("." + suffix).
 // Kısa kurallarla (ör. "x.com") yanlış eşleşme olmaz — "box.com" yakalanmaz.
 // Microsoft bypass sinyali: ilgili domainler filtrelenmez (Roblox hata kodu 2 önlemi).
-// Roblox web API'leri de filtrelenmez (join API seli passthrough olmalı).
+// Roblox web API / oyun domainleri artık filtrelenir (split/bypass uygulanır).
+// Sosyal medya (discord, twitter vb.) filtre dışı kalmaya devam eder.
 func MatchesDomain(sni string, blacklist []string) bool {
 	sni = strings.ToLower(sni)
 
@@ -97,7 +93,8 @@ func MatchesDomain(sni string, blacklist []string) bool {
 		}
 	}
 
-	// Roblox web API'leri asla bölünmez — join API seli boğulmasın.
+	// Roblox web API / oyun domainleri artık filtrelenir (split/bypass uygulanır).
+	// Sosyal medya (discord, twitter vb.) filtre dışı kalmaya devam eder.
 	if webApiRobloxHost(sni) {
 		return false
 	}
