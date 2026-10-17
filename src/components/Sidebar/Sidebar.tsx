@@ -1,41 +1,27 @@
-import React, { useMemo } from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { LayoutDashboard, Settings, User, Shield, LogOut } from 'lucide-react';
-import { useConnectionStore } from '../../store/connectionStore';
-import { useAuthStore } from '../../store/authStore';
+import { LayoutDashboard, Settings, User, Check, Copy } from 'lucide-react';
 import type { PageKey, SidebarProps } from './Sidebar.types';
-import { Badge } from '../ui';
-
-const NAV_ITEMS: { key: PageKey; label: string; icon: React.ComponentType<any>; adminOnly?: boolean }[] = [
-  { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { key: 'settings', label: 'Settings', icon: Settings },
-  { key: 'account', label: 'Account', icon: User },
-  { key: 'admin', label: 'Admin', icon: Shield, adminOnly: true },
-];
+import { useTranslation } from '../../store/languageStore';
+import { useAuthStore } from '../../store/authStore';
 
 export const Sidebar = React.memo(({ activePage, onNavigate }: SidebarProps) => {
-  const status = useConnectionStore((s) => s.status);
+  const { t } = useTranslation();
   const user = useAuthStore((s) => s.user);
-  const logout = useAuthStore((s) => s.logout);
-  const [confirmLogout, setConfirmLogout] = React.useState(false);
+  const knotsId = user?.knotsIdFormatted || user?.id || '7F3A-91C2-6D84-B0E7';
+  const [copied, setCopied] = useState(false);
 
-  const items = NAV_ITEMS.filter((it) => !it.adminOnly || user?.isAdmin);
+  const handleCopyId = () => {
+    navigator.clipboard?.writeText(knotsId);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
-  const displayName = user?.username || 'Operator';
-  const avatarLetter = displayName.charAt(0).toUpperCase();
-
-  const statusLabel = useMemo(() => {
-    switch (status) {
-      case 'connected':
-        return { text: 'Connected', tone: 'success' as const };
-      case 'connecting':
-        return { text: 'Connecting…', tone: 'accent' as const };
-      case 'error':
-        return { text: 'Error', tone: 'danger' as const };
-      default:
-        return { text: 'Disconnected', tone: 'neutral' as const };
-    }
-  }, [status]);
+  const items: { key: PageKey; label: string; icon: React.ComponentType<any> }[] = [
+    { key: 'dashboard', label: t('nav.overview'), icon: LayoutDashboard },
+    { key: 'account', label: t('nav.account'), icon: User },
+    { key: 'settings', label: t('nav.settings'), icon: Settings },
+  ];
 
   return (
     <nav
@@ -45,165 +31,141 @@ export const Sidebar = React.memo(({ activePage, onNavigate }: SidebarProps) => 
         flexShrink: 0,
         display: 'flex',
         flexDirection: 'column',
-        padding: 'var(--space-4) var(--space-3)',
-        borderRight: '1px solid var(--glass-card-border)',
-        background: 'linear-gradient(180deg, rgba(14,22,38,0.5), rgba(9,17,31,0.5))',
-        backdropFilter: 'var(--glass-blur)',
+        padding: '24px 16px',
+        borderRight: '1px solid #1E2D38',
+        background: '#0B151D',
       }}
     >
-{/* LOGO */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 var(--space-2)', marginBottom: 'var(--space-6)' }}>
-        <motion.img
+      {/* LOGO & TITLE (Spec 1. Product Direction) */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 4px', marginBottom: 32 }}>
+        <img
           src="logo.png"
           alt="Knots Connect"
-          whileHover={{ rotate: 8, scale: 1.05 }}
-          transition={{ duration: 0.2 }}
           style={{
-            width: 36,
-            height: 36,
-            borderRadius: 11,
+            width: 32,
+            height: 32,
+            borderRadius: 8,
             objectFit: 'cover',
-            boxShadow: '0 4px 14px rgba(61,181,255,0.18)',
           }}
         />
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '0.3px', color: 'var(--text-primary)' }}>Knots Connect</div>
-          <div style={{ fontSize: 10, color: 'var(--accent)', letterSpacing: '1px', fontWeight: 600 }}>Secure Internet</div>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em', color: '#EEF4F5' }}>Knots Connect</div>
+          <div style={{ fontSize: 10, color: '#7E949F', letterSpacing: '0.08em', fontWeight: 600, textTransform: 'uppercase' }}>{t('nav.privateNetwork')}</div>
         </div>
       </div>
 
       {/* MENÜ */}
-      <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>
+      <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6, flex: 1, padding: 0, margin: 0 }}>
         {items.map((item) => {
           const isActive = item.key === activePage;
           const Icon = item.icon;
           return (
-            <li key={item.key}>
-              <button
+            <li key={item.key} style={{ position: 'relative' }}>
+              {isActive && (
+                <motion.div
+                  layoutId="sidebar-active-indicator"
+                  transition={{
+                    type: 'spring',
+                    stiffness: 450,
+                    damping: 34,
+                    mass: 0.8,
+                  }}
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    borderRadius: 8,
+                    background: '#14252E',
+                    border: '1px solid #29404B',
+                    boxShadow: '0 4px 16px rgba(0, 0, 0, 0.25)',
+                    zIndex: 0,
+                  }}
+                >
+                  <span
+                    style={{
+                      position: 'absolute',
+                      left: 0,
+                      top: 8,
+                      bottom: 8,
+                      width: 3,
+                      borderRadius: '0 3px 3px 0',
+                      background: '#58BFD2',
+                      boxShadow: '0 0 10px rgba(88, 191, 210, 0.6)',
+                    }}
+                  />
+                </motion.div>
+              )}
+
+              <motion.button
+                whileHover={{ x: 3 }}
+                whileTap={{ scale: 0.98 }}
+                transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
                 onClick={() => onNavigate(item.key)}
                 aria-current={isActive ? 'page' : undefined}
                 style={{
+                  position: 'relative',
+                  zIndex: 1,
                   width: '100%',
                   display: 'flex',
                   alignItems: 'center',
                   gap: 12,
-                  padding: '10px 12px',
-                  borderRadius: 'var(--radius-md)',
+                  padding: '10px 14px',
+                  borderRadius: 8,
                   border: 'none',
-                  background: isActive ? 'var(--glass-accent)' : 'transparent',
-                  color: isActive ? 'var(--accent)' : 'var(--text-muted)',
+                  background: 'transparent',
+                  color: isActive ? '#58BFD2' : '#7E949F',
                   fontSize: 14,
                   fontWeight: isActive ? 600 : 500,
                   textAlign: 'left',
                   cursor: 'pointer',
-                  position: 'relative',
-                  boxShadow: isActive ? 'inset 0 0 0 1px rgba(61,181,255,0.12)' : 'none',
-                  transition: 'background 180ms var(--ease), color 180ms var(--ease), box-shadow 180ms var(--ease)',
+                  transition: 'color 160ms ease',
                 }}
-                onMouseEnter={(e) => { if (!isActive) { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.color = 'var(--text-secondary)'; } }}
-                onMouseLeave={(e) => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)'; } }}
               >
-                {isActive && (
-                  <motion.span
-                    layoutId="sidebar-active"
-                    transition={{ type: 'spring', stiffness: 400, damping: 32 }}
-                  style={{
-                       position: 'absolute',
-                       left: 0,
-                       top: 0,
-                       bottom: 0,
-                       margin: 'auto',
-                       height: 20,
-                       width: 3,
-                       borderRadius: 3,
-                       background: 'var(--accent)',
-                       boxShadow: '0 0 12px rgba(61,181,255,0.33)',
-                     }}
-                  />
-                )}
-                <Icon size={18} strokeWidth={isActive ? 2.2 : 1.8} />
-                <span className="sidebar-label">{item.label}</span>
-              </button>
+                <motion.div
+                  animate={{ scale: isActive ? 1.08 : 1 }}
+                  transition={{ duration: 0.18 }}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <Icon size={18} strokeWidth={isActive ? 2.2 : 1.8} color={isActive ? '#58BFD2' : '#7E949F'} />
+                </motion.div>
+                <span style={{ color: isActive ? '#EEF4F5' : '#7E949F', fontWeight: isActive ? 600 : 500, letterSpacing: '-0.01em' }}>
+                  {item.label}
+                </span>
+              </motion.button>
             </li>
           );
         })}
       </ul>
 
-      {/* ALT: KULLANICI KARTI */}
+      {/* Knots ID Footer (Spec Page 2 & 9) */}
       <div
+        onClick={handleCopyId}
+        title="Click to copy Knots ID"
         style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          padding: 14,
-          borderRadius: 'var(--radius-lg)',
-          background: 'var(--glass-card-bg)',
-          backdropFilter: 'var(--glass-card-blur)',
-          WebkitBackdropFilter: 'var(--glass-card-blur)',
-          border: '1px solid var(--glass-card-border)',
-          boxShadow: 'var(--glass-card-shadow)',
+          marginTop: 'auto',
+          paddingTop: 16,
+          borderTop: '1px solid #1E2D38',
+          cursor: 'pointer',
+          borderRadius: 6,
+          padding: '12px 8px 4px',
+          transition: 'background 140ms ease',
         }}
       >
-        <div
-          style={{
-            width: 38,
-            height: 38,
-            borderRadius: '50%',
-            background: 'linear-gradient(135deg, var(--accent), var(--accent-active))',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: 'var(--text-inverse)',
-            fontWeight: 700,
-            fontSize: 15,
-            flexShrink: 0,
-          }}
-        >
-          {avatarLetter}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: '#7E949F', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+            Knots ID
+          </span>
+          {copied ? (
+            <span style={{ fontSize: 10, color: '#61D1A8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 3 }}>
+              <Check size={11} /> {t('account.copied')}
+            </span>
+          ) : (
+            <Copy size={11} color="#7E949F" />
+          )}
         </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {displayName}
-          </div>
-          <Badge tone={statusLabel.tone} style={{ marginTop: 3, fontSize: 9.5, padding: '2px 8px' }}>
-            {statusLabel.text}
-          </Badge>
+        <div style={{ fontSize: 11.5, fontFamily: "'DM Mono', monospace", color: '#9DB0B7', letterSpacing: '0.04em' }}>
+          {knotsId}
         </div>
-        <button
-          aria-label="Çıkış"
-          title="Çıkış yap"
-          onClick={async () => {
-            if (!confirmLogout) {
-              setConfirmLogout(true);
-              setTimeout(() => setConfirmLogout(false), 3000);
-              return;
-            }
-            await logout();
-          }}
-          style={{
-            width: 28,
-            height: 28,
-            borderRadius: 8,
-            border: 'none',
-            background: confirmLogout ? 'rgba(239,68,68,0.15)' : 'transparent',
-            color: confirmLogout ? 'var(--danger)' : 'var(--text-muted)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-            transition: 'background 150ms var(--ease), color 150ms var(--ease)',
-          }}
-          onMouseEnter={(e) => { if (!confirmLogout) { e.currentTarget.style.background = 'rgba(239,68,68,0.12)'; e.currentTarget.style.color = 'var(--danger)'; } }}
-          onMouseLeave={(e) => { if (!confirmLogout) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)'; } }}
-        >
-          <LogOut size={15} strokeWidth={2} />
-        </button>
       </div>
-      {confirmLogout && (
-        <div style={{ fontSize: 11, color: 'var(--danger)', padding: '4px 2px 0', textAlign: 'center' }}>
-          Tekrar tıkla — çıkış yapılacak
-        </div>
-      )}
     </nav>
   );
 });

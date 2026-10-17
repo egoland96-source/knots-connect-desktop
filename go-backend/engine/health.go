@@ -1,3 +1,5 @@
+//go:build ignore
+
 // health.go — her strateji için canlı sağlık takibi.
 //
 // Kullanıcının istediği ölçümler burada tutulur:

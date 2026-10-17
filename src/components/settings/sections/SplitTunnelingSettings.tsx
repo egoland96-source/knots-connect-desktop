@@ -74,6 +74,18 @@ export const SplitTunnelingSettings: React.FC<{ onSaved: () => void }> = ({ onSa
   const [customAppInput, setCustomAppInput] = useState('');
   const [loadingProcesses, setLoadingProcesses] = useState(false);
 
+  // --- Smart Split state ---
+  const [smartSplitEnabled, setSmartSplitEnabled] = useState(false);
+  const [smartSplitLoading, setSmartSplitLoading] = useState(false);
+  const [smartSplitStatus, setSmartSplitStatus] = useState<{
+    gameEngineRunning: boolean;
+    socialEngineRunning: boolean;
+    socialRoutesCached: number;
+  } | null>(null);
+  const [gameBypassed, setGameBypassed] = useState(0);
+  const [socialDetected, setSocialDetected] = useState(0);
+  const [lastSocialSni, setLastSocialSni] = useState<string | null>(null);
+
   const cfg = splitSettings?.splitTunneling;
   const isEnabled = cfg?.enabled ?? true;
   const autoDetect = cfg?.autoDetectGames ?? true;
@@ -81,6 +93,55 @@ export const SplitTunnelingSettings: React.FC<{ onSaved: () => void }> = ({ onSa
   const customApps = cfg?.customApps ?? [];
   const activeRoutesCount = splitSettings?.activeRoutesCount ?? 0;
   const gateway = splitSettings?.physicalGateway ?? '192.168.1.1';
+
+  // Smart Split durumunu ilk yüklemede çek
+  useEffect(() => {
+    bridgeService.getSmartSplitStatus?.().then((status) => {
+      if (status) {
+        setSmartSplitEnabled(status.enabled);
+        setSmartSplitStatus({
+          gameEngineRunning: status.gameEngineRunning,
+          socialEngineRunning: status.socialEngineRunning,
+          socialRoutesCached: status.socialRoutesCached,
+        });
+      }
+    }).catch(() => {});
+  }, []);
+
+  // Smart Split telemetri dinleyicisi
+  useEffect(() => {
+    const unsub = bridgeService.onSmartSplitTelemetry?.((data) => {
+      if (data.engine === 'game') {
+        setGameBypassed((n) => n + 1);
+      } else if (data.engine === 'social' && data.type === 'smart-route') {
+        setSocialDetected((n) => n + 1);
+        if (data.sni) setLastSocialSni(data.sni);
+      }
+    });
+    return () => { unsub?.(); };
+  }, []);
+
+  const handleToggleSmartSplit = async () => {
+    setSmartSplitLoading(true);
+    try {
+      if (smartSplitEnabled) {
+        await bridgeService.disableSmartSplit?.();
+        setSmartSplitEnabled(false);
+        setSmartSplitStatus(null);
+      } else {
+        await bridgeService.enableSmartSplit?.();
+        setSmartSplitEnabled(true);
+        // Kısa bekleyip status güncelle
+        setTimeout(async () => {
+          const s = await bridgeService.getSmartSplitStatus?.();
+          if (s) setSmartSplitStatus({ gameEngineRunning: s.gameEngineRunning, socialEngineRunning: s.socialEngineRunning, socialRoutesCached: s.socialRoutesCached });
+        }, 1500);
+      }
+      onSaved();
+    } finally {
+      setSmartSplitLoading(false);
+    }
+  };
 
   const fetchProcesses = async () => {
     setLoadingProcesses(true);
@@ -138,6 +199,107 @@ export const SplitTunnelingSettings: React.FC<{ onSaved: () => void }> = ({ onSa
         desc="Oyunlarda 0 ms ek gecikme ile tam yerel hat hızını korurken; sosyal medya ve web sitelerinde IP adresinizi güvenceye alın."
         icon={<GitFork size={14} />}
       />
+
+      {/* ─── SMART SPLIT MASTER CARD ─── */}
+      <div
+        style={{
+          padding: '16px 18px',
+          borderRadius: 14,
+          background: smartSplitEnabled
+            ? 'linear-gradient(135deg, rgba(52,211,153,0.10), rgba(167,139,250,0.07))'
+            : 'rgba(8,13,22,0.7)',
+          border: `1px solid ${smartSplitEnabled ? 'rgba(52,211,153,0.30)' : 'rgba(255,255,255,0.08)'}`,
+          transition: 'all 200ms ease',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <Sparkles size={14} color={smartSplitEnabled ? '#34D399' : '#64748B'} />
+              <span style={{ fontSize: 13.5, fontWeight: 800, color: smartSplitEnabled ? '#F8FAFC' : '#94A3B8', letterSpacing: '-0.01em' }}>
+                Akıllı Otomatik Yönlendirme
+              </span>
+              {smartSplitEnabled && (
+                <span style={{
+                  fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
+                  padding: '2px 7px', borderRadius: 999,
+                  background: 'rgba(52,211,153,0.14)', color: '#34D399',
+                  border: '1px solid rgba(52,211,153,0.24)',
+                }}>
+                  AKTİF
+                </span>
+              )}
+            </div>
+            <p style={{ margin: 0, fontSize: 12, color: '#64748B', lineHeight: 1.55, maxWidth: 380 }}>
+              Oyun trafiği → <strong style={{ color: '#A78BFA' }}>DPI Bypass Engine</strong> (0 ms ping) &nbsp;|&nbsp;
+              Sosyal medya → <strong style={{ color: '#34D399' }}>WireGuard VPN</strong> (IP gizleme).
+              Hiçbir ayar gerekmez — SNI tespiti ile tamamen otomatik.
+            </p>
+
+            {/* Canlı sayaçlar */}
+            {smartSplitEnabled && (
+              <div style={{ display: 'flex', gap: 12, marginTop: 10, flexWrap: 'wrap' }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '4px 10px', borderRadius: 8,
+                  background: 'rgba(167,139,250,0.10)', border: '1px solid rgba(167,139,250,0.20)',
+                }}>
+                  <Gamepad2 size={11} color="#A78BFA" />
+                  <span style={{ fontSize: 11, color: '#A78BFA', fontFamily: 'DM Mono, monospace', fontWeight: 700 }}>
+                    {gameBypassed} oyun bağlantısı bypass edildi
+                  </span>
+                </div>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '4px 10px', borderRadius: 8,
+                  background: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.18)',
+                }}>
+                  <Shield size={11} color="#34D399" />
+                  <span style={{ fontSize: 11, color: '#34D399', fontFamily: 'DM Mono, monospace', fontWeight: 700 }}>
+                    {socialDetected} sosyal domain VPN'e yönlendi
+                    {lastSocialSni && <span style={{ opacity: 0.7 }}> · son: {lastSocialSni}</span>}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Engine durum indikatörleri */}
+            {smartSplitEnabled && smartSplitStatus && (
+              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                {[
+                  { label: 'Game Engine', running: smartSplitStatus.gameEngineRunning, color: '#A78BFA' },
+                  { label: 'Social Engine', running: smartSplitStatus.socialEngineRunning, color: '#34D399' },
+                ].map(({ label, running, color }) => (
+                  <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10.5, color: running ? color : '#475569', fontFamily: 'DM Mono, monospace' }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: running ? color : '#334155', boxShadow: running ? `0 0 6px ${color}` : 'none' }} />
+                    {label}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Toggle */}
+          <button
+            onClick={handleToggleSmartSplit}
+            disabled={smartSplitLoading}
+            style={{
+              width: 52, height: 30, borderRadius: 999, border: '1px solid',
+              borderColor: smartSplitEnabled ? 'rgba(52,211,153,0.9)' : 'rgba(255,255,255,0.14)',
+              background: smartSplitEnabled ? '#34D399' : 'rgba(255,255,255,0.10)',
+              position: 'relative', cursor: smartSplitLoading ? 'wait' : 'pointer',
+              transition: 'all 160ms ease', flexShrink: 0,
+              opacity: smartSplitLoading ? 0.6 : 1,
+            }}
+          >
+            <span style={{
+              position: 'absolute', top: 3, left: smartSplitEnabled ? 24 : 3,
+              width: 22, height: 22, borderRadius: '50%', background: '#fff',
+              transition: 'left 160ms ease', boxShadow: '0 2px 8px rgba(0,0,0,0.22)',
+            }} />
+          </button>
+        </div>
+      </div>
 
       {/* Mode Status Card */}
       <div

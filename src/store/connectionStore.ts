@@ -107,6 +107,7 @@ interface ConnectionStoreState {
   disconnect: () => Promise<void>;
   refreshStatus: () => Promise<void>;
   setEngineMode: (mode: EngineMode) => Promise<void>;
+  setServerId: (id: string | null) => void;
   setEncryptionMethod: (methodId: number) => Promise<void>;
   toggleSetting: (key: keyof ConnectionStoreState['settings']) => Promise<void>;
   loadInitialSettings: () => Promise<void>;
@@ -251,6 +252,10 @@ export const useConnectionStore = create<ConnectionStoreState>()((set, get) => (
     } catch (error) {
       set({ errorMessage: (error as Error).message });
     }
+  },
+
+  setServerId: (id) => {
+    set({ serverId: id });
   },
 
   setEncryptionMethod: async (methodId) => {

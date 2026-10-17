@@ -1,3 +1,4 @@
+
 // strat_split2.go — TCP 443 SNI-blacklist ClientHello'yu 2 parçaya bölen
 // strateji. Bu, KNOWN-GOOD davranışın birebir taşındığı stratejidir:
 // "Roblox sorunsuz çalıştırdı" motorun algoritması aynen korunur.
@@ -18,7 +19,12 @@ import (
 // passthrough full SNI gösterdiği için video CDN'leri yine boğuluyordu;
 // splitv ise hostname'i parçalar arasına yayarak DPI'ın eşleştirmesini
 // imkansızlaştırır. Liste boş bırakılır — splitv her şeye uygulanır.
-var globalVideoSkips []string
+var globalVideoSkips []string = []string{
+	"msftconnecttest.com",
+	"dns.msftconnecttest.com",
+	"ipv6.msftconnecttest.com",
+	"www.msftconnecttest.com",
+}
 
 // globalSkipMatch, SNI'nin video CDN muafiyet listesinde olup olmadığını
 // kontrol eder (tam veya alt domain eşleşmesi: "googlevideo.com" kuralı
@@ -72,33 +78,23 @@ func (s *Split2Strategy) Apply(raw, addr []byte, send engine.SendFunc) (bool, er
 		return false, nil
 	}
 
-	if len(payload) < 50 {
-		return false, nil
-	}
-	if !IsClientHello(payload) {
-		return false, nil
+	// Global bypass: her TCP paketi (her IP, her domain) bypass uygulanir.
+	sni := ""
+	if len(payload) >= 5 && payload[0] == 0x16 && payload[1] == 0x03 && len(payload) > 5 && payload[5] == 0x01 {
+		sni = ExtractSNI(payload)
 	}
 
-	sni := ExtractSNI(payload)
-	if sni == "" {
-		return false, nil
-	}
-	if IsAdDomainFast(sni) {
-		fmt.Fprintf(os.Stderr, "[adblock] DROP ad/tracker: %s\n", sni)
-		return true, nil
-	}
+	fmt.Fprintf(os.Stderr, "[DEBUG] bypass uygulanacak: domain=%s payload_len=%d ip_hdr=%d tcp_hdr=%d\n", sni, len(payload), ipHdrLen, tcpHdrLen)
+
 	if s.force && globalSkipMatch(sni) {
 		fmt.Fprintf(os.Stderr, "[go-engine] global skip (video CDN): %s -> passthrough\n", sni)
 		return false, nil
 	}
-	if !s.force && !MatchesDomain(sni, s.blacklist) {
-		return false, nil
-	}
 
 	if s.force {
-		fmt.Fprintf(os.Stderr, "[go-engine] SNI bölünüyor (global): %s -> 2 parça (mode %d)\n", sni, s.mode)
+		fmt.Fprintf(os.Stderr, "[go-engine] SNI bolunuyor (global force): %s -> %d parca (mode %d)\n", sni, s.mode, s.mode)
 	} else {
-		fmt.Fprintf(os.Stderr, "[go-engine] SNI eşlendi: %s -> parçalanıyor (mode %d)\n", sni, s.mode)
+		fmt.Fprintf(os.Stderr, "[go-engine] SNI eslendi (global): %s -> %d parca (mode %d)\n", sni, s.mode, s.mode)
 	}
 	s.sendFragmented(raw, addr, ipHdrLen, tcpHdrLen, payload, send)
 	return true, nil

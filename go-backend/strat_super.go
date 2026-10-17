@@ -1,3 +1,5 @@
+//go:build ignore
+
 // strat_super.go — Superonline tipi DPI'lara karşı agresif stratejiler.
 //
 // Superonline'ın TCP birleştirme motoru küçük parçalarda zorlanır:

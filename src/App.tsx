@@ -32,6 +32,7 @@ import { Dashboard } from './pages/Dashboard/Dashboard';
 import { Settings } from './pages/Settings/Settings';
 import { Account } from './pages/Account/Account';
 import { Admin } from './pages/Admin/Admin';
+import { ConnectionLog } from './pages/ConnectionLog/ConnectionLog';
 import { LoginForm } from './components/auth/LoginForm';
 import { VerifyEmailScreen } from './components/auth/VerifyEmailScreen';
 import { ConnectionBorder } from './components/ConnectionBorder/ConnectionBorder';
@@ -50,6 +51,7 @@ const PAGES: Record<PageKey, React.ComponentType> = {
   settings: Settings,
   account: Account,
   admin: Admin,
+  connectionLog: ConnectionLog,
 };
 
 type AuthState = 'loading' | 'authenticated' | 'unauthenticated';
@@ -143,7 +145,8 @@ const [authState, setAuthState] = useState<'loading' | 'authenticated' | 'unauth
   }
 
   return (
-    <div className="app-shell">`n      <ConnectionStatusToast />
+    <div className="app-shell">
+      <ConnectionStatusToast />
       <AnimatePresence mode="wait">
         <motion.div
           key="app"

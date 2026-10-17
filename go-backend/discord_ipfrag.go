@@ -1,3 +1,5 @@
+//go:build ignore
+
 // discord_ipfrag.go — Discord/hedef ClientHello'larını IP KATMANINDA parçalar.
 //
 // Neden: Türkiye DPI'ı Discord SNI'sini HER pakette tarıyor (ilk paketi değil,

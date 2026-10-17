@@ -1,3 +1,5 @@
+//go:build ignore
+
 // monitor.go — Result Monitor: stratejinin gerçek sonucunu ölçer.
 //
 // Bir ClientHello'yu stratejiyle işlediğimizde akışı kaydederiz; akışta

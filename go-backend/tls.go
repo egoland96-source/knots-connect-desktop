@@ -1,4 +1,3 @@
-// tls.go — TLS ClientHello tespiti ve SNI (Server Name Indication) ayrıştırması.
 // Python k_tls.py'nin tam Go karşılığıdır.
 // parse_real_sni() tabanlı gerçek TLS yapısını takip eden ayrıştırıcı kullanılır.
 // Ham byte araması yerine RFC 8446 uyumlu extension traversal yapılır.

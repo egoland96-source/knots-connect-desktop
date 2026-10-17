@@ -1,3 +1,5 @@
+//go:build ignore
+
 // engine.go — Adaptive Network Engine orkestratörü.
 //
 // Paket akışı:
@@ -201,7 +203,7 @@ func (e *Engine) poolStrategy(now time.Time) (Strategy, bool) {
 // handled=true: paket tüketildi (parçalanma) — main orijinali göndermez.
 // handled=false: passthrough — main orijinali gönderir.
 func (e *Engine) HandleOutbound(info PacketInfo, raw, addr []byte, send SendFunc) (handled bool, err error) {
-	if info.Proto != 6 || info.Ver != 4 || !isClientHello(info, raw) {
+	if info.Proto != 6 || info.Ver != 4 {
 		return false, nil
 	}
 

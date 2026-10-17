@@ -1,3 +1,5 @@
+//go:build ignore
+
 // strat_split3.go — TCP 443 SNI-blacklist ClientHello'yu 3 parçaya bölen
 // strateji. split2 başarısız olduğunda (cooldown) devreye giren alternatiftir:
 // akış, ilk parçası en küçük olacak şekilde üçe bölünür. Bazı DPI

@@ -56,6 +56,16 @@ contextBridge.exposeInMainWorld('knots', {
   addBypassApp: (app) => ipcRenderer.invoke('knots:addBypassApp', app).catch(() => ({ success: false })),
   removeBypassApp: (app) => ipcRenderer.invoke('knots:removeBypassApp', app).catch(() => ({ success: false })),
 
+  // Smart Split Tunneling — Otomatik oyun/sosyal medya akıllı yönlendirme
+  enableSmartSplit: () => ipcRenderer.invoke('knots:enableSmartSplit').catch(() => ({ success: false })),
+  disableSmartSplit: () => ipcRenderer.invoke('knots:disableSmartSplit').catch(() => ({ success: false })),
+  getSmartSplitStatus: () => ipcRenderer.invoke('knots:getSmartSplitStatus').catch(() => null),
+  onSmartSplitTelemetry: (callback) => {
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on('knots:smartSplitTelemetry', listener);
+    return () => ipcRenderer.removeListener('knots:smartSplitTelemetry', listener);
+  },
+
   // Python'dan gelen canlı akış / event dinleyicisi (main.cjs içindeki event dispatch mekanizmasıyla eşleşir)
   onTelemetry: (callback) => {
     const listener = (_event, data) => callback(data);

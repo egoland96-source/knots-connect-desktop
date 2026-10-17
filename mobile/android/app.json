@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "Knots Connect",
+    "slug": "knots-connect",
+    "version": "1.2.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#080E14"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "is.knots.connect"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#080E14"
+      },
+      "package": "is.knots.connect"
+    }
+  }
+}

@@ -1,3 +1,5 @@
+//go:build ignore
+
 // sni.go — engine içi SNI ayrıştırma (main paketindeki ExtractSNI'nin
 // motor-kendi kendine yeten kopyası; import döngüsü yaratmamak için burada).
 package engine

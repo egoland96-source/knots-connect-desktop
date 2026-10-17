@@ -1,3 +1,5 @@
+//go:build ignore
+
 // probe.go — strateji sağlık metriklerinin toplanması ve özeti.
 //
 // "success rate, connection latency, packet errors, retries" ölçümleri

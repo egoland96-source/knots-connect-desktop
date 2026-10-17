@@ -163,4 +163,40 @@ export const bridgeService = {
       return window.knots.removeBypassApp(appName);
     }
   },
+
+  // =========================================================================
+  // SMART SPLIT TUNNELING — Otomatik oyun/sosyal medya akıllı yönlendirme
+  // =========================================================================
+
+  /** Smart Split Tunneling'i etkinleştirir (oyun bypass + sosyal medya VPN). */
+  enableSmartSplit: async (): Promise<any> => {
+    if (window.knots && typeof window.knots.enableSmartSplit === 'function') {
+      return window.knots.enableSmartSplit();
+    }
+    return { success: false, message: 'Desteklenmiyor' };
+  },
+
+  /** Smart Split Tunneling'i devre dışı bırakır. */
+  disableSmartSplit: async (): Promise<any> => {
+    if (window.knots && typeof window.knots.disableSmartSplit === 'function') {
+      return window.knots.disableSmartSplit();
+    }
+    return { success: false, message: 'Desteklenmiyor' };
+  },
+
+  /** Smart Split durumunu sorgular. */
+  getSmartSplitStatus: async (): Promise<any> => {
+    if (window.knots && typeof window.knots.getSmartSplitStatus === 'function') {
+      return window.knots.getSmartSplitStatus();
+    }
+    return null;
+  },
+
+  /** Smart Split engine telemetrisini dinler (oyun bypass sayacı, sosyal SNI tespitleri). */
+  onSmartSplitTelemetry: (callback: (data: any) => void): (() => void) => {
+    if (window.knots && typeof window.knots.onSmartSplitTelemetry === 'function') {
+      return window.knots.onSmartSplitTelemetry(callback);
+    }
+    return () => {};
+  },
 };
