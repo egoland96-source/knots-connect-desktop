@@ -1597,10 +1597,14 @@ function _writeSecureStorage(data) {
   fs.writeFileSync(SECURE_STORAGE_FILE, JSON.stringify(data), 'utf8');
 }
 
-function getSecureValue(key) {
+async function getSecureValue(key) {
   if (keytar) {
     try {
-      return keytar.getPassword(SERVICE_NAME, key);
+      const val = await Promise.race([
+        keytar.getPassword(SERVICE_NAME, key),
+        new Promise((r) => setTimeout(() => r(null), 1000)),
+      ]);
+      if (val) return val;
     } catch (_) {}
   }
   try {
@@ -1608,32 +1612,36 @@ function getSecureValue(key) {
     const stored = _readSecureStorage();
     const entry = stored[key];
     if (!entry) return null;
-    const decrypted = safeStorage.unpackSync(Buffer.from(entry, 'base64'));
-    return Buffer.isBuffer(decrypted) ? decrypted.toString('utf8') : decrypted || null;
+    if (safeStorage && typeof safeStorage.isEncryptionAvailable === 'function' && safeStorage.isEncryptionAvailable()) {
+      return safeStorage.decryptString(Buffer.from(entry, 'base64'));
+    }
+    return Buffer.from(entry, 'base64').toString('utf8');
   } catch (_) {}
   return null;
 }
 
-function setSecureValue(key, value) {
+async function setSecureValue(key, value) {
   if (keytar) {
     try {
-      keytar.setPassword(SERVICE_NAME, key, value);
-      return;
+      await keytar.setPassword(SERVICE_NAME, key, value);
     } catch (_) {}
   }
   try {
     const { safeStorage } = require('electron');
-    const encrypted = safeStorage.packSync(value);
     const stored = _readSecureStorage();
-    stored[key] = Buffer.from(encrypted).toString('base64');
+    if (safeStorage && typeof safeStorage.isEncryptionAvailable === 'function' && safeStorage.isEncryptionAvailable()) {
+      stored[key] = safeStorage.encryptString(value).toString('base64');
+    } else {
+      stored[key] = Buffer.from(value, 'utf8').toString('base64');
+    }
     _writeSecureStorage(stored);
   } catch (_) {}
 }
 
-function removeSecureValue(key) {
+async function removeSecureValue(key) {
   if (keytar) {
     try {
-      keytar.deletePassword(SERVICE_NAME, key);
+      await keytar.deletePassword(SERVICE_NAME, key);
     } catch (_) {}
   }
   try {
@@ -2146,9 +2154,8 @@ app.whenReady().then(() => {
     // gaming mode
     wgSetEnabled(false);
   }
-  // Açılış ekranı süresi her seferinde rastgele: 5-18 sn (20 sn altı).
-  // Kullanıcı beklerken splash'te geri sayım görür, süre dolunca ana ekran açılır.
-  splashWaitMs = 5000 + Math.floor(Math.random() * 14000); // 5.000 - 18.999 ms
+  // Açılış ekranı süresi: Hızlı ve akıcı açılış (1.5 - 2.5 sn)
+  splashWaitMs = 1500 + Math.floor(Math.random() * 1000);
   bootLog(`splashWaitMs=${splashWaitMs}`);
   createSplash();
   splashStart = Date.now();

@@ -106,19 +106,16 @@ const [authState, setAuthState] = useState<'loading' | 'authenticated' | 'unauth
     return () => unsubscribe?.();
   }, []);
 
-  // Run restoreSession ONLY ONCE on app startup
+  // Run restoreSession on app startup with fail-safe timeout
   useEffect(() => {
-    let cancelled = false;
-    restoreSession().then(() => {
-      if (cancelled) return;
-      const currentAuth = useAuthStore.getState().isAuthenticated;
-      setAuthState(currentAuth ? 'authenticated' : 'unauthenticated');
-    }).catch((err) => {
-      if (!cancelled) {
+    restoreSession()
+      .then(() => {
+        const isAuth = useAuthStore.getState().isAuthenticated;
+        setAuthState(isAuth ? 'authenticated' : 'unauthenticated');
+      })
+      .catch(() => {
         setAuthState('unauthenticated');
-      }
-    });
-    return () => { cancelled = true; };
+      });
   }, [restoreSession]);
 
   // Sync authState with isAuthenticated changes (login, guest login, logout)
@@ -126,6 +123,19 @@ const [authState, setAuthState] = useState<'loading' | 'authenticated' | 'unauth
     if (!initialized) return;
     setAuthState(isAuthenticated ? 'authenticated' : 'unauthenticated');
   }, [isAuthenticated, initialized]);
+
+  // Fail-safe: Asla 1 saniyeden uzun "Loading…" ekranında takılı kalma
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setAuthState((current) => {
+        if (current === 'loading') {
+          return useAuthStore.getState().isAuthenticated ? 'authenticated' : 'unauthenticated';
+        }
+        return current;
+      });
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, []);
 
   if (authState === 'loading') {
     return (

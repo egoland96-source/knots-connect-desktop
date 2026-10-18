@@ -159,7 +159,10 @@ const secureStorage = {
   async getToken(): Promise<string | null> {
     try {
       if (typeof window !== 'undefined' && window.knotsAuth) {
-        return await window.knotsAuth.getToken();
+        return await Promise.race([
+          window.knotsAuth.getToken(),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 1200)),
+        ]);
       }
       return null;
     } catch (error) {
@@ -170,17 +173,22 @@ const secureStorage = {
   async setToken(token: string): Promise<void> {
     try {
       if (typeof window !== 'undefined' && window.knotsAuth) {
-        await window.knotsAuth.setToken(token);
+        await Promise.race([
+          window.knotsAuth.setToken(token),
+          new Promise<void>((resolve) => setTimeout(resolve, 1200)),
+        ]);
       }
     } catch (error) {
       console.error('Failed to set access token:', error);
-      throw error;
     }
   },
   async removeToken(): Promise<void> {
     try {
       if (typeof window !== 'undefined' && window.knotsAuth) {
-        await window.knotsAuth.removeToken();
+        await Promise.race([
+          window.knotsAuth.removeToken(),
+          new Promise<void>((resolve) => setTimeout(resolve, 1200)),
+        ]);
       }
     } catch (error) {
       console.error('Failed to remove access token:', error);
@@ -189,7 +197,10 @@ const secureStorage = {
   async getRefreshToken(): Promise<string | null> {
     try {
       if (typeof window !== 'undefined' && window.knotsAuth) {
-        return await window.knotsAuth.getRefreshToken();
+        return await Promise.race([
+          window.knotsAuth.getRefreshToken(),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 1200)),
+        ]);
       }
       return null;
     } catch (error) {
@@ -200,17 +211,22 @@ const secureStorage = {
   async setRefreshToken(token: string): Promise<void> {
     try {
       if (typeof window !== 'undefined' && window.knotsAuth) {
-        await window.knotsAuth.setRefreshToken(token);
+        await Promise.race([
+          window.knotsAuth.setRefreshToken(token),
+          new Promise<void>((resolve) => setTimeout(resolve, 1200)),
+        ]);
       }
     } catch (error) {
       console.error('Failed to set refresh token:', error);
-      throw error;
     }
   },
   async removeRefreshToken(): Promise<void> {
     try {
       if (typeof window !== 'undefined' && window.knotsAuth) {
-        await window.knotsAuth.removeRefreshToken();
+        await Promise.race([
+          window.knotsAuth.removeRefreshToken(),
+          new Promise<void>((resolve) => setTimeout(resolve, 1200)),
+        ]);
       }
     } catch (error) {
       console.error('Failed to remove refresh token:', error);
@@ -635,8 +651,36 @@ export const useAuthStore = create<AuthStoreState & AuthActions>()(
         const storedToken = await secureStorage.getToken();
 
         if (!storedToken) {
+          try {
+            const bridge: any = (typeof window !== 'undefined' ? (window as any).knots : null);
+            if (bridge?.getIdentity) {
+              const d: any = await Promise.race([
+                bridge.getIdentity().catch(() => null),
+                new Promise((r) => setTimeout(() => r(null), 1000)),
+              ]);
+              if (d && (d.knotsIdRaw || d.knotsId)) {
+                const raw = (d.knotsIdRaw || d.knotsId).replace(/\D/g, '').slice(0, 16);
+                if (raw.length === 16) {
+                  const mnemonic = d.mnemonic || generateMnemonicFallback();
+                  const user = knotsUserFromIdentity(raw, mnemonic);
+                  const token = `knots_${raw}_${Date.now()}`;
+                  await secureStorage.setToken(token);
+                  set((state) => {
+                    state.user = user;
+                    state.accessToken = token;
+                    state.refreshToken = token;
+                    state.isAuthenticated = true;
+                    state.initialized = true;
+                  });
+                  return;
+                }
+              }
+            }
+          } catch (_) {}
+
           set((state) => {
             state.initialized = true;
+            state.isAuthenticated = false;
           });
           return;
         }
