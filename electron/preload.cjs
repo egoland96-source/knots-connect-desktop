@@ -104,6 +104,27 @@ contextBridge.exposeInMainWorld('knots', {
   installUpdate: () => ipcRenderer.invoke('app:installUpdate').catch(() => {}),
   rollbackUpdate: () => ipcRenderer.invoke('app:rollbackUpdate').catch(() => {}),
   openReleases: () => ipcRenderer.invoke('app:openReleases').catch(() => {}),
+
+  // Motor çöktüğünde/kapandığında bağlantı durumu güncellemesi
+  onStatusChanged: (callback) => {
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on('knots:statusChanged', listener);
+    return () => ipcRenderer.removeListener('knots:statusChanged', listener);
+  },
+
+  // k_main.exe'den gelen kritik hata mesajları (WinDivert, AV, driver hataları)
+  onEngineError: (callback) => {
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on('knots:engineError', listener);
+    return () => ipcRenderer.removeListener('knots:engineError', listener);
+  },
+
+  // WireGuard bu bilgisayarda kurulu değil bildirimi
+  onWgUnavailable: (callback) => {
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on('knots:wgUnavailable', listener);
+    return () => ipcRenderer.removeListener('knots:wgUnavailable', listener);
+  },
 });
 
 // 2. Özel TitleBar Pencere Kontrolleri (main.cjs içindeki window:* handler'larına bağlanır)

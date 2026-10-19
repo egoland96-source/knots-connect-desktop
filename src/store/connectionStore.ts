@@ -520,9 +520,54 @@ export const useConnectionStore = create<ConnectionStoreState>()((set, get) => (
           set({ wgStatus: payload, settings: { ...get().settings, wireguardEnabled: !!payload?.running } });
         });
       }
+
+      // Motor çöküyor → UI bağlantısız duruma geçir
+      let statusUnsub = () => {};
+      if (typeof (window.knots as any).onStatusChanged === 'function') {
+        statusUnsub = (window.knots as any).onStatusChanged((payload: { connected: boolean; state: string }) => {
+          if (!payload.connected) {
+            set({
+              status: 'disconnected',
+              serverId: null,
+              errorMessage: null,
+              downloadSpeed: 0,
+              uploadSpeed: 0,
+              latencyMs: 0,
+            });
+          }
+        });
+      }
+
+      // k_main.exe stderr hataları (WinDivert, AV, driver)
+      let engineErrUnsub = () => {};
+      if (typeof (window.knots as any).onEngineError === 'function') {
+        engineErrUnsub = (window.knots as any).onEngineError((payload: { message: string }) => {
+          console.error('[Engine Error]', payload.message);
+          // Kritik hata ise UI'ya yansıt
+          if (payload.message && /windivert|access|denied|driver|failed|error/i.test(payload.message)) {
+            set({ errorMessage: `Motor hatası: ${payload.message.slice(0, 120)}` });
+          }
+        });
+      }
+
+      // WireGuard kurulu değil bildirimi → operatingMode'u gaming'e çek
+      let wgUnavailableUnsub = () => {};
+      if (typeof (window.knots as any).onWgUnavailable === 'function') {
+        wgUnavailableUnsub = (window.knots as any).onWgUnavailable((_payload: { message: string }) => {
+          set((state) => ({
+            operatingMode: 'gaming',
+            settings: { ...state.settings, wireguardEnabled: false },
+            wgStatus: { running: false, installed: false, state: null, server: null, handshakeSec: null, transfers: null },
+          }));
+        });
+      }
+
       return () => {
         unsubscribe();
         wgUnsub();
+        statusUnsub();
+        engineErrUnsub();
+        wgUnavailableUnsub();
       };
     } 
     else if (typeof bridgeService.onTelemetry === 'function') {

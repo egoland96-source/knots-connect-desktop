@@ -107,7 +107,7 @@ let appSettingsMemory = {
   adblock: true,
   dnsMode: 'local', // local | cloudflare
   wireguardEnabled: false,
-  operatingMode: 'hybrid', // 'gaming' | 'hybrid' | 'privacy'
+  operatingMode: 'gaming', // 'gaming' | 'hybrid' | 'privacy' — varsayılan: WG gerektirmez
   splitTunneling: {
     enabled: true,
     autoDetectGames: true,
@@ -310,7 +310,12 @@ function startGoProcess() {
   });
 
   goProcess.stderr.on('data', (data) => {
-    console.error(`[Go-STDERR] ${data.toString().trim()}`);
+    const msg = data.toString().trim();
+    console.error(`[Go-STDERR] ${msg}`);
+    // Kritik hata mesajlarını UI'ya ilet (WinDivert/driver hataları görünsün)
+    if (msg && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('knots:engineError', { message: msg });
+    }
   });
 
   goProcess.on('close', (code) => {
@@ -320,11 +325,17 @@ function startGoProcess() {
     goReadLine = null;
     goProcessUserStopped = false;
 
+    // UI'ya bağlantı kesildi sinyali gönder
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('knots:statusChanged', { connected: false, state: 'disconnected' });
+    }
+
     if (wasUserStopped) {
       console.log('[Electron] Go motoru kullanıcı tarafından durduruldu, yeniden başlatılmiyor.');
       return;
     }
 
+    // İlk 2 saniye içinde kapandıysa (hemen crash) — yeniden deneme sayısını sınırla
     console.log('[Electron] Go motoru 1 saniye içinde otomatik yeniden başlatılacak...');
     notifyUser(
       'Knots motor arızası',
@@ -737,7 +748,7 @@ async function setOperatingMode(targetMode) {
     stopSplitMonitor();
     stopSmartSplitEngines();
     await clearSplitRoutes();
-    await wgSetEnabled(false);
+    await wgSetEnabled(false); // WG yoksa bu zaten no-op döner
     appSettingsMemory.wireguardEnabled = false;
     currentEngineMode = 'go';
     startGoProcess();
@@ -745,25 +756,43 @@ async function setOperatingMode(targetMode) {
   }
 
   if (targetMode === 'privacy') {
-    // 2. SADECE TEK VPN (DPI MOTORLARI KAPALI)
+    // 2. SADECE VPN (DPI MOTORLARI KAPALI) — WG yoksa gaming'e fallback
     stopSplitMonitor();
     stopSmartSplitEngines();
     await clearSplitRoutes();
-    stopEngineProcess(); // Ana DPI motorunu durdur — sadece VPN tüneli kalsın
-    await wgSetEnabled(true);
-    appSettingsMemory.wireguardEnabled = true;
-    return { success: true, mode: 'privacy', message: 'Gizlilik Modu aktif (Yalnızca WireGuard VPN - Tam IP Gizliliği)' };
+    const wgRes = await wgSetEnabled(true);
+    if (wgRes.success) {
+      stopEngineProcess(); // WG çalışıyorsa DPI motorunu kapat
+      appSettingsMemory.wireguardEnabled = true;
+      return { success: true, mode: 'privacy', message: 'Gizlilik Modu aktif (WireGuard VPN)' };
+    } else {
+      // WG kurulu değil — DPI bypass ile devam et
+      console.warn('[Electron] Privacy modu: WG yok, DPI-only ile devam ediliyor.');
+      appSettingsMemory.wireguardEnabled = false;
+      currentEngineMode = 'go';
+      startGoProcess();
+      return { success: true, mode: 'gaming', message: 'WireGuard kurulu değil, DPI Bypass modu ile devam ediliyor.' };
+    }
   }
 
   if (targetMode === 'hybrid') {
-    // 3. AKILLI HİBRİT: VPN + 2. OYUN DPI MOTORU BİRLİKTE
-    stopEngineProcess(); // 1. bağımsız motoru kapat
-    await wgSetEnabled(true);
-    appSettingsMemory.wireguardEnabled = true;
-    startSmartSplitEngines(); // 2. motoru (Oyun DPI bypass) başlat
-    await applySplitRoutes();
-    startSplitMonitor();
-    return { success: true, mode: 'hybrid', message: 'Akıllı Hibrit Mod aktif (Sosyal Medya VPN + Oyunlar 2. DPI Motoru)' };
+    // 3. HİBRİT: VPN + DPI — WG yoksa sadece DPI ile çalış
+    stopEngineProcess();
+    const wgRes = await wgSetEnabled(true);
+    if (wgRes.success) {
+      appSettingsMemory.wireguardEnabled = true;
+      startSmartSplitEngines();
+      await applySplitRoutes();
+      startSplitMonitor();
+      return { success: true, mode: 'hybrid', message: 'Akıllı Hibrit Mod aktif (VPN + DPI)' };
+    } else {
+      // WG kurulu değil — sadece Go DPI motoru çalıştır
+      console.warn('[Electron] Hybrid modu: WG yok, DPI-only ile devam ediliyor.');
+      appSettingsMemory.wireguardEnabled = false;
+      currentEngineMode = 'go';
+      startGoProcess();
+      return { success: true, mode: 'gaming', message: 'WireGuard kurulu değil, DPI Bypass modu ile devam ediliyor.' };
+    }
   }
 }
 
@@ -1188,17 +1217,24 @@ ipcMain.handle('knots:setOperatingMode', async (_e, mode) => {
 /** Smart Split'i etkinleştirir: WireGuard'ı (VPN) ve 2. Motoru (Oyun DPI motoru) birlikte çalıştırır */
 ipcMain.handle('knots:enableSmartSplit', async () => {
   try {
-    // 1. WireGuard VPN tünelini aç (sosyal medya ve genel gizlilik için)
-    await wgSetEnabled(true);
-    appSettingsMemory.wireguardEnabled = true;
+    // WireGuard varsa aç (opsiyonel — yoksa sadece DPI bypass çalışır)
+    const wgRes = await wgSetEnabled(true);
+    if (wgRes.success) {
+      appSettingsMemory.wireguardEnabled = true;
+      console.log('[SmartSplit] WireGuard VPN başlatıldı.');
+    } else {
+      console.warn('[SmartSplit] WireGuard yok, sadece DPI motoru çalışacak.');
+      appSettingsMemory.wireguardEnabled = false;
+    }
 
-    // 2. 2. Motoru (Oyun DPI eşlikçi motoru) başlat
+    // DPI motoru her durumda başlat
     startSmartSplitEngines();
     appSettingsMemory.smartSplitEnabled = true;
     saveAppSettings();
 
-    console.log('[SmartSplit] WireGuard VPN ve 2. Motor (Oyun DPI) birlikte başlatıldı.');
-    return { success: true, message: 'Smart Split Tunneling aktif: Oyunlar 2. Motorla DPI bypass, Sosyal Medya VPN tünelinde.' };
+    return { success: true, message: wgRes.success
+      ? 'Smart Split Tunneling aktif: Oyunlar DPI bypass, Sosyal Medya VPN tünelinde.'
+      : 'DPI Bypass aktif (WireGuard kurulu değil, sadece DPI çalışıyor).' };
   } catch (err) {
     console.error('[SmartSplit] Etkinleştirme hatası:', err.message);
     return { success: false, message: err.message };
@@ -1369,16 +1405,17 @@ ipcMain.handle('knots:updateSetting', async (event, key, value) => {
     }
   }
 
-  // WireGuard toggle: ayarı kalıcı yap ve Windows WireGuard servisini aç/kapat.
-  // Uygulama admin olduğu için sc.exe yetki sorunu yaşamaz; işlem başarısızsa
-  // ayar geri alınır (UI tutarsız durumda kalmaz).
+  // WireGuard toggle: WG kurulu ise aç/kapat; kurulu değilse ayarı false yap, hata döndürme.
   if (key === 'wireguardEnabled') {
     try {
       const res = await wgSetEnabled(!!value);
       if (!res.success) {
-        appSettingsMemory[key] = !safeValue;
+        // WG kurulu değil — ayarı false'a zorla, başarı döndür (UI kilitlenmesin)
+        appSettingsMemory[key] = false;
         saveAppSettings();
-        return { success: false, message: res.message || 'WireGuard servisi yönetilemedi.' };
+        wgAutoStart = false;
+        mainWindow?.webContents.send('knots:wgState', { running: false, installed: false, state: null, server: null });
+        return { success: true, message: 'WireGuard bu cihazda kurulu değil.' };
       }
       wgAutoStart = !!value;
       mainWindow?.webContents.send('knots:wgState', await wgRealtimeStatus());
@@ -2144,15 +2181,43 @@ app.whenReady().then(() => {
         console.log('[WireGuard] Hibrit mod için başlatıldı.');
         applySplitRoutes();
         startSplitMonitor();
+      } else {
+        // WireGuard kurulu değil — DPI bypass tek başına çalışsın (gaming fallback)
+        console.warn(`[WireGuard] Hibrit mod için WG başlatılamadı: ${res.message} — Oyun moduna geçiliyor.`);
+        appSettingsMemory.operatingMode = 'gaming';
+        appSettingsMemory.wireguardEnabled = false;
+        saveAppSettings();
+        startGoProcess();
+        const notifyWgMissing = () => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('knots:wgUnavailable', {
+              message: 'WireGuard bu bilgisayarda kurulu değil. DPI Bypass (Oyun Modu) ile devam ediliyor.'
+            });
+          }
+        };
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          notifyWgMissing();
+        } else {
+          app.once('browser-window-created', () => setTimeout(notifyWgMissing, 2000));
+        }
       }
     });
   } else if (opMode === 'privacy') {
     wgSetEnabled(true).then((res) => {
-      if (res.success) console.log('[WireGuard] Gizlilik modu için başlatıldı.');
+      if (res.success) {
+        console.log('[WireGuard] Gizlilik modu için başlatıldı.');
+      } else {
+        console.warn(`[WireGuard] Gizlilik modu WG başlatılamadı: ${res.message} — Oyun moduna geçiliyor.`);
+        appSettingsMemory.operatingMode = 'gaming';
+        appSettingsMemory.wireguardEnabled = false;
+        saveAppSettings();
+        startGoProcess();
+      }
     });
   } else {
-    // gaming mode
+    // gaming mode — WG kullanılmıyor, sadece Go DPI motoru
     wgSetEnabled(false);
+    startGoProcess();
   }
   // Açılış ekranı süresi: Hızlı ve akıcı açılış (1.5 - 2.5 sn)
   splashWaitMs = 1500 + Math.floor(Math.random() * 1000);
