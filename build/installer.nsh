@@ -26,4 +26,20 @@
   ; Güncel (Go) motor dosyasının pakette bulunduğunu doğrula
   IfFileExists "$INSTDIR\backend\k_main.exe" 0 +2
     DetailPrint "Go motoru hazır: $INSTDIR\backend\k_main.exe"
+
+  ; WireGuard otomatik kurulumu (eğer sistemde yüklü değilse)
+  IfFileExists "$PROGRAMFILES64\WireGuard\wireguard.exe" +4 0
+    IfFileExists "$INSTDIR\resources\wireguard.msi" 0 +3
+      DetailPrint "WireGuard VPN bileşenleri yükleniyor..."
+      ExecWait '"$SYSDIR\msiexec.exe" /i "$INSTDIR\resources\wireguard.msi" /qn /norestart DO_NOT_LAUNCH=1'
+
+  ; C:\ProgramData\WireGuard dizinini oluştur ve KnotsImport.conf kopyala
+  CreateDirectory "C:\ProgramData\WireGuard"
+  IfFileExists "$INSTDIR\resources\KnotsImport.conf" 0 +2
+    CopyFiles /SILENT "$INSTDIR\resources\KnotsImport.conf" "C:\ProgramData\WireGuard\KnotsImport.conf"
+
+  ; KnotsImport tünel servisini kaydet
+  IfFileExists "$PROGRAMFILES64\WireGuard\wireguard.exe" 0 +3
+    IfFileExists "C:\ProgramData\WireGuard\KnotsImport.conf" 0 +2
+      ExecWait '"$PROGRAMFILES64\WireGuard\wireguard.exe" /installtunnelservice "C:\ProgramData\WireGuard\KnotsImport.conf"'
 !macroend

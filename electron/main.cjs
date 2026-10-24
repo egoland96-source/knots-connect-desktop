@@ -106,8 +106,8 @@ let appSettingsMemory = {
   aggressiveMode: true,
   adblock: true,
   dnsMode: 'local', // local | cloudflare
-  wireguardEnabled: false,
-  operatingMode: 'gaming', // 'gaming' | 'hybrid' | 'privacy' — varsayılan: WG gerektirmez
+  wireguardEnabled: true,
+  operatingMode: 'hybrid', // 'gaming' | 'hybrid' | 'privacy' — varsayılan: Hibrit (VPN + DPI)
   splitTunneling: {
     enabled: true,
     autoDetectGames: true,
@@ -467,8 +467,95 @@ async function wgServiceStatus() {
   return { installed: res.ok, running, state, raw: res.stdout.trim() };
 }
 
+let wgSetupInProgress = false;
+async function ensureWireGuardSetup() {
+  if (wgSetupInProgress) return;
+  wgSetupInProgress = true;
+  try {
+    const wgExe = path.join('C:', 'Program Files', 'WireGuard', 'wireguard.exe');
+    const confDir = path.join('C:', 'ProgramData', 'WireGuard');
+    const confPath = path.join(confDir, 'KnotsImport.conf');
+
+    // 1. WireGuard kurulu değilse sessizce kur
+    if (!fs.existsSync(wgExe)) {
+      bootLog('[WireGuard Setup] wireguard.exe bulunamadı, MSI aranıyor...');
+      const possibleMsi = [
+        path.join(process.resourcesPath || '', 'wireguard.msi'),
+        path.join(__dirname, '..', 'resources', 'wireguard.msi'),
+        path.join(__dirname, '..', 'build', 'wireguard.msi'),
+        path.join(BACKEND_DIR, 'wireguard.msi'),
+      ];
+      const msiPath = possibleMsi.find((p) => p && fs.existsSync(p));
+      if (msiPath) {
+        bootLog(`[WireGuard Setup] ${msiPath} ile sessiz kurulum başlatılıyor...`);
+        await new Promise((resolve) => {
+          execFile('msiexec.exe', ['/i', msiPath, '/qn', '/norestart', 'DO_NOT_LAUNCH=1'], { windowsHide: true, timeout: 60000 }, (err) => {
+            if (err) bootLog(`[WireGuard Setup] MSI kurulum hatası: ${err.message}`);
+            else bootLog('[WireGuard Setup] WireGuard MSI kurulumu tamamlandı.');
+            resolve();
+          });
+        });
+        await new Promise((r) => setTimeout(r, 2000));
+      } else {
+        bootLog('[WireGuard Setup] wireguard.msi bulunamadı.');
+      }
+    }
+
+    // 2. C:\ProgramData\WireGuard\KnotsImport.conf dosyasını oluştur
+    try {
+      if (!fs.existsSync(confDir)) {
+        fs.mkdirSync(confDir, { recursive: true });
+      }
+      if (!fs.existsSync(confPath)) {
+        const possibleConf = [
+          path.join(process.resourcesPath || '', 'KnotsImport.conf'),
+          path.join(__dirname, '..', 'resources', 'KnotsImport.conf'),
+          path.join(__dirname, '..', 'build', 'KnotsImport.conf'),
+          path.join(BACKEND_DIR, 'KnotsImport.conf'),
+        ];
+        const srcConf = possibleConf.find((p) => p && fs.existsSync(p));
+        if (srcConf) {
+          fs.copyFileSync(srcConf, confPath);
+          bootLog(`[WireGuard Setup] Konfigürasyon kopyalandı: ${confPath}`);
+        } else {
+          const embeddedConf = `[Interface]\nPrivateKey = MDyZxanLlJMphao2Wu+iqfETUSf6xdT4ddkZlSb9WlI=\nAddress = 10.66.66.3/24\nDNS = 1.1.1.1\n\n[Peer]\nPublicKey = whCWmMqLP9wfvDLKeWk5k9rOlYSXaUuPzqfJ2YU1hjk=\nPresharedKey = +i1z2GTTHjKHSWS70rtKLPAR4n5PmkGaytdL3zD4oMw=\nEndpoint = 162.35.122.121:62464\nAllowedIPs = 0.0.0.0/0\n`;
+          fs.writeFileSync(confPath, embeddedConf, 'utf8');
+          bootLog(`[WireGuard Setup] Gömülü konfigürasyon yazıldı: ${confPath}`);
+        }
+      }
+    } catch (err) {
+      bootLog(`[WireGuard Setup] Konfigürasyon hazırlama hatası: ${err.message}`);
+    }
+
+    // 3. KnotsImport tünel servisi kurulu mu kontrol et
+    if (fs.existsSync(wgExe)) {
+      let status = await wgServiceStatus();
+      if (!status.installed) {
+        bootLog('[WireGuard Setup] KnotsImport tünel servisi kurulu değil, kuruluyor...');
+        await new Promise((resolve) => {
+          execFile(wgExe, ['/installtunnelservice', confPath], { windowsHide: true, timeout: 15000 }, (err) => {
+            if (err) bootLog(`[WireGuard Setup] Tünel servisi kurulum hatası: ${err.message}`);
+            else bootLog('[WireGuard Setup] Tünel servisi kaydedildi.');
+            resolve();
+          });
+        });
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+    }
+  } catch (err) {
+    bootLog(`[WireGuard Setup] Genel hata: ${err.message}`);
+  } finally {
+    wgSetupInProgress = false;
+  }
+}
+
 async function wgSetEnabled(enabled) {
-  const status = await wgServiceStatus();
+  let status = await wgServiceStatus();
+  if (!status.installed && enabled) {
+    // Servis yoksa önce otomatik kurulumu dene
+    await ensureWireGuardSetup();
+    status = await wgServiceStatus();
+  }
   if (!status.installed) return { success: false, message: `WireGuard tünel servisi kurulu değil (${WG_SERVICE}).` };
   if (enabled) {
     if (status.running) return { success: true, running: true, message: 'WireGuard zaten açık.' };
@@ -2169,10 +2256,15 @@ if (!gotSingleLock) {
   app.quit();
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   bootLog(`whenReady OK | dir=${__dirname}`);
   Menu.setApplicationMenu(null);
   loadAppSettings();
+  try {
+    await ensureWireGuardSetup();
+  } catch (err) {
+    bootLog(`[WireGuard Setup] Başlangıç hatası: ${err.message}`);
+  }
   const opMode = appSettingsMemory.operatingMode || 'hybrid';
   console.log(`[Electron] Başlangıç çalışma modu: ${opMode}`);
   if (opMode === 'hybrid') {
